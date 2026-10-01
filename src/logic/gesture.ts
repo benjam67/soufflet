@@ -1,7 +1,7 @@
 // Machine à états du geste de gifle : appui maintenu (armer) puis swipe sans lever le doigt.
 // Pure : on lui passe des temps (ms) et des positions écran (px CSS).
 import { FIGHTERS, SLAP, type FighterId } from '../config/balance';
-import { chargeAt, isOverheated, swipeAngle } from './slap';
+import { chargeAt, isOverheated, swipeAngle, timeToFull, type ChargeSpeed } from './slap';
 
 /** Mouvement toléré pendant l'armement avant de considérer que le swipe commence. */
 export const SWIPE_DEAD_ZONE_PX = 10;
@@ -32,21 +32,28 @@ export class SlapGesture {
   /**
    * @param fighter perso qui gifle (temps de montée de la jauge)
    * @param direction +1 si l'adversaire est à droite, -1 s'il est à gauche
-   * @param chargeSpeed facteur de vitesse de la jauge (état sonné, phase 5)
+   * @param speed vitesse de la jauge : 1 = normale, ou courbe irrégulière (état sonné)
    */
   constructor(
     fighter: FighterId,
     readonly direction: 1 | -1,
-    readonly chargeSpeed: () => number = () => 1,
+    readonly speed: ChargeSpeed = 1,
   ) {
     this.chargeTimeMs = FIGHTERS[fighter].chargeTimeMs;
+    this.fullAt = timeToFull(this.chargeTimeMs, speed);
   }
+
+  /** Temps d'appui pour remplir la jauge (dépend de la courbe). */
+  readonly fullAt: number;
 
   /** Charge actuelle en % (figée dès que le swipe a commencé). */
   charge(t: number): number {
     if (this.phase === 'swiping' || this.phase === 'done') return this.frozenCharge;
     if (this.phase !== 'charging' || !this.press) return 0;
-    return chargeAt(t - this.press.t, this.chargeTimeMs, this.chargeSpeed());
+    const held = t - this.press.t;
+    // Jauge pleine : inutile d'intégrer la courbe au-delà.
+    if (held >= this.fullAt) return 100;
+    return chargeAt(held, this.chargeTimeMs, this.speed);
   }
 
   down(t: number, x: number, y: number): void {
@@ -79,7 +86,7 @@ export class SlapGesture {
   /** À appeler à chaque image : déclenche la surchauffe pendant l'armement. */
   update(t: number): GestureOutcome | null {
     if (this.phase !== 'charging' || !this.press) return null;
-    if (isOverheated(t - this.press.t, this.chargeTimeMs, this.chargeSpeed())) {
+    if (t - this.press.t > this.fullAt && isOverheated(t - this.press.t, this.chargeTimeMs, this.speed)) {
       this.phase = 'done';
       this.frozenCharge = 100;
       return { type: 'selfslap', charge: 100 };

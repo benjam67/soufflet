@@ -92,6 +92,14 @@ export function bakeAll(scene: Phaser.Scene) {
     bakeText(scene, `ban_turn_${id}`, `À TOI, ${name} !`, title(52, CSS.cream, 10));
     bakeText(scene, `ann_roundfor_${id}`, `ROUND POUR ${name} !`, title(40, CSS.cream, 8));
     bakeText(scene, `ann_harder_${id}`, `PLUS FORT, VERS ${name} !`, title(34, CSS.cream, 8));
+    bakeText(scene, `ann_special_${id}`, `${FIGHTERS[id].special.name.toUpperCase()} !`, title(96, CSS.pink, 15));
+    bakeText(scene, `lbl_ready_${id}`, `${FIGHTERS[id].special.name.toUpperCase()} PRÊT !`, {
+      fontFamily: FONT_TITLE,
+      fontSize: '22px',
+      color: CSS.cream,
+      backgroundColor: CSS.pink,
+      padding: { x: 10, y: 3 },
+    });
   }
 
   // Chiffres de dégâts
@@ -112,6 +120,28 @@ export function bakeAll(scene: Phaser.Scene) {
   bakeText(scene, 'lbl_missed', LABELS.missed, tag(CSS.red));
   bakeText(scene, 'lbl_limp', LABELS.limp, tag(CSS.red));
   bakeText(scene, 'lbl_self', LABELS.self, tag(CSS.red));
+  bakeText(scene, 'lbl_stun', 'SONNÉ !', tag(CSS.cyan));
+  bakeText(scene, 'lbl_special', 'SPÉCIALE !', tag(CSS.pink));
+  bakeText(scene, 'lbl_ragemax', 'RAGE MAX !', {
+    fontFamily: FONT_TITLE,
+    fontSize: '15px',
+    color: CSS.cream,
+    backgroundColor: CSS.pink,
+    padding: { x: 6, y: 1 },
+  });
+  // Étoile du perso sonné
+  bakeGraphics(scene, 'fx_dizzy', 30, 30, (g) => {
+    const pts: Phaser.Math.Vector2[] = [];
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      const r = i % 2 ? 6 : 14;
+      pts.push(new Phaser.Math.Vector2(15 + Math.cos(a) * r, 15 + Math.sin(a) * r));
+    }
+    g.fillStyle(COLORS.ink, 1);
+    g.fillPoints(pts.map((p) => new Phaser.Math.Vector2(15 + (p.x - 15) * 1.15, 15 + (p.y - 15) * 1.15)), true);
+    g.fillStyle(COLORS.yellow, 1);
+    g.fillPoints(pts, true);
+  });
 
   // Onomatopées : grosses lettres japonaises + sous-titre français
   for (const [k, o] of Object.entries(ONOMATOPOEIA)) {

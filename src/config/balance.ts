@@ -27,7 +27,8 @@ export const FIGHTERS: Record<FighterId, FighterBalance> = {
     chargeTimeMs: 1400,
     goldenZone: [80, 90],
     resistance: 0.85,
-    special: { name: 'Le Battoir', hits: 1, multiplier: 1.8 },
+    // ×1,8 dans la roadmap ; ×2,0 pour équilibrer avec La Toupie (3 × 0,7) — voir CHANGELOG, phase 5.
+    special: { name: 'Le Battoir', hits: 1, multiplier: 2.0 },
   },
   lola: {
     name: 'Lola Tornade',

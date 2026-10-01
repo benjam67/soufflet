@@ -15,6 +15,15 @@ export class HealthBar extends Phaser.GameObjects.Container {
   private trailPx = -1;
   private barW = 400;
   private readonly barH = 30;
+  /** Jauge de rage, fine, sous la barre de vie. */
+  private rage = 0;
+  private rageFull = false;
+  private rageG: Phaser.GameObjects.Graphics;
+  private rageGlow: Phaser.GameObjects.Graphics;
+  private rageTag: Phaser.GameObjects.Image | null = null;
+  private readonly rageY = 37;
+  private readonly rageH = 8;
+  private readonly rageFrac = 0.6;
   private readonly slant = 16;
 
   constructor(
@@ -25,6 +34,8 @@ export class HealthBar extends Phaser.GameObjects.Container {
   ) {
     super(scene, 0, 0);
     this.g = scene.add.graphics();
+    this.rageGlow = scene.add.graphics().setAlpha(0);
+    this.rageG = scene.add.graphics();
     this.nameText = scene.add
       .text(0, 0, name.toUpperCase(), {
         fontFamily: FONT_TITLE,
@@ -44,7 +55,7 @@ export class HealthBar extends Phaser.GameObjects.Container {
         strokeThickness: 5,
       })
       .setOrigin(side === 'left' ? 0 : 1, 0);
-    this.add([this.g, this.nameText, this.kanaText]);
+    this.add([this.g, this.rageGlow, this.rageG, this.nameText, this.kanaText]);
     scene.add.existing(this);
     this.addToUpdateList();
   }
@@ -54,9 +65,10 @@ export class HealthBar extends Phaser.GameObjects.Container {
     this.barW = width;
     this.setPosition(outerX, y);
     const dir = this.side === 'left' ? 1 : -1;
-    this.nameText.setPosition(dir * (this.slant + 4), this.barH + 6);
-    this.kanaText.setPosition(dir * (this.slant + 10 + this.nameText.width), this.barH + 12);
+    this.nameText.setPosition(dir * (this.slant + 4), this.rageY + this.rageH + 4);
+    this.kanaText.setPosition(dir * (this.slant + 10 + this.nameText.width), this.rageY + this.rageH + 10);
     this.redraw();
+    this.redrawRage();
   }
 
   setValue(ratio: number, instant = false) {
@@ -64,6 +76,60 @@ export class HealthBar extends Phaser.GameObjects.Container {
     this.shown = this.target;
     if (instant || this.target > this.trail) this.trail = this.target;
     this.redraw();
+  }
+
+  /** Rage de 0 à 1 ; pleine = spéciale prête (la jauge clignote, étiquette « RAGE MAX ! »). */
+  setRage(ratio: number) {
+    const r = Phaser.Math.Clamp(ratio, 0, 1);
+    const full = r >= 1;
+    if (r === this.rage && full === this.rageFull) return;
+    this.rage = r;
+    if (full !== this.rageFull) {
+      this.rageFull = full;
+      this.scene.tweens.killTweensOf(this.rageGlow);
+      this.rageGlow.setAlpha(0);
+      this.rageTag?.destroy();
+      this.rageTag = null;
+      if (full) {
+        this.scene.tweens.add({ targets: this.rageGlow, alpha: { from: 0.2, to: 0.9 }, duration: 280, yoyo: true, repeat: -1 });
+        const dir = this.side === 'left' ? 1 : -1;
+        const x = dir * (this.slant + this.barW * this.rageFrac + 10);
+        this.rageTag = this.scene.add.image(x, this.rageY + this.rageH / 2, 'lbl_ragemax').setOrigin(this.side === 'left' ? 0 : 1, 0.5).setAngle(-4);
+        this.add(this.rageTag);
+        this.rageTag.setScale(1.6);
+        this.scene.tweens.add({ targets: this.rageTag, scale: 1, duration: 220, ease: 'Back.Out' });
+      }
+    }
+    this.redrawRage();
+  }
+
+  get rageIsFull() {
+    return this.rageFull;
+  }
+
+  private redrawRage() {
+    const dir = this.side === 'left' ? 1 : -1;
+    const w = this.barW * this.rageFrac;
+    const x0 = dir * (this.slant * 0.5);
+    const rect = (g: Phaser.GameObjects.Graphics, frac: number, pad: number) => {
+      const x = dir === 1 ? x0 - pad : x0 - frac * w - pad;
+      g.fillRect(x, this.rageY - pad, frac * w + pad * 2, this.rageH + pad * 2);
+    };
+    const g = this.rageG;
+    g.clear();
+    g.fillStyle(COLORS.ink, 0.9);
+    rect(g, 1, 2);
+    if (this.rage > 0) {
+      g.fillStyle(this.rageFull ? COLORS.pink : COLORS.red, 1);
+      rect(g, this.rage, 0);
+      g.fillStyle(0xffffff, 0.3);
+      const x = dir === 1 ? x0 : x0 - this.rage * w;
+      g.fillRect(x, this.rageY + 1, this.rage * w, 2);
+    }
+    const glow = this.rageGlow;
+    glow.clear();
+    glow.fillStyle(COLORS.pink, 0.55);
+    rect(glow, 1, 6);
   }
 
   preUpdate(_t: number, dt: number) {

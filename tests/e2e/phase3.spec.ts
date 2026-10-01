@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { collectErrors, expectNoErrors, Finger, getState, SHOTS, waitPhase, waitReady } from './helpers';
+import { armFreezeOn, collectErrors, expectNoErrors, Finger, getState, shootFrozen, SHOTS, waitPhase, waitReady } from './helpers';
 
 interface FxState {
   flashes: number;
@@ -19,31 +19,6 @@ interface FxState {
   timeScale: number;
 }
 const fx = (page: Page) => page.evaluate(() => (window.__slap as unknown as { fx: FxState }).fx);
-
-/**
- * Met la boucle du jeu en pause dès que `cond` devient vrai (vérifié à chaque milliseconde),
- * pour photographier l'instant exact d'un effet.
- */
-async function armFreezeOn(page: Page, cond: string) {
-  await page.evaluate((c) => {
-    const check = new Function('s', 'fx', `return (${c});`) as (s: unknown, fx: unknown) => boolean;
-    const w = window as unknown as { __froze?: boolean };
-    w.__froze = false;
-    const id = setInterval(() => {
-      const slap = window.__slap as unknown as { state: unknown; fx: unknown; game: { loop: { sleep: () => void } } };
-      if (slap?.fx && check(slap.state, slap.fx)) {
-        slap.game.loop.sleep();
-        w.__froze = true;
-        clearInterval(id);
-      }
-    }, 1);
-  }, cond);
-}
-async function shootFrozen(page: Page, path: string) {
-  await page.waitForFunction(() => (window as unknown as { __froze?: boolean }).__froze === true, null, { timeout: 15_000 });
-  await page.screenshot({ path });
-  await page.evaluate(() => (window.__slap as unknown as { game: { loop: { wake: () => void } } }).game.loop.wake());
-}
 
 async function slap(page: Page, finger: Finger, minCharge = 55, from = 300, to = 600) {
   await finger.down(from, 230);

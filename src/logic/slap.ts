@@ -1,11 +1,56 @@
 // Règles pures de la gifle : charge, zone dorée, surchauffe, swipe, dégâts.
 // Aucune dépendance à Phaser : tout est testable seul.
-import { FIGHTERS, SLAP, type FighterId } from '../config/balance';
+import { ADVANCED, FIGHTERS, SLAP, type FighterId } from '../config/balance';
+import type { Rng } from './rng';
+
+/**
+ * Vitesse de la jauge au fil de l'appui : facteur multiplicatif en fonction du temps (ms).
+ * Un simple nombre = vitesse constante (1 = normale).
+ */
+export type ChargeCurve = (ms: number) => number;
+export type ChargeSpeed = number | ChargeCurve;
+
+/** Pas d'intégration de la jauge quand sa vitesse varie (ms). */
+const DT = 4;
 
 /** Charge en % (0–100) après `heldMs` millisecondes d'appui, pour un temps de montée donné. */
-export function chargeAt(heldMs: number, chargeTimeMs: number, speedFactor = 1): number {
+export function chargeAt(heldMs: number, chargeTimeMs: number, speed: ChargeSpeed = 1): number {
   if (heldMs <= 0) return 0;
-  return Math.min(100, (heldMs * speedFactor * 100) / chargeTimeMs);
+  if (typeof speed === 'number') return Math.min(100, (heldMs * speed * 100) / chargeTimeMs);
+  let c = 0;
+  for (let t = 0; t < heldMs && c < 100; t += DT) c += (speed(t) * Math.min(DT, heldMs - t) * 100) / chargeTimeMs;
+  return Math.min(100, c);
+}
+
+/** Temps d'appui (ms) pour que la jauge atteigne 100 %. */
+export function timeToFull(chargeTimeMs: number, speed: ChargeSpeed = 1): number {
+  if (typeof speed === 'number') return chargeTimeMs / speed;
+  let c = 0;
+  let t = 0;
+  while (c < 100 && t < chargeTimeMs * 10) {
+    c += (speed(t) * DT * 100) / chargeTimeMs;
+    t += DT;
+  }
+  return t;
+}
+
+/**
+ * Jauge d'un perso sonné : la vitesse change sans arrêt, au hasard, entre −30 % et +30 %
+ * (nouvelle valeur toutes les ~260 ms, raccords en douceur : on sent les à-coups).
+ */
+export function stunCurve(rng: Rng, variance = ADVANCED.stunSpeedVariance): ChargeCurve {
+  const knots: number[] = [];
+  const period = 260;
+  const knot = (i: number) => {
+    while (knots.length <= i) knots.push(1 + (rng() * 2 - 1) * variance);
+    return knots[i];
+  };
+  return (ms: number) => {
+    const i = Math.floor(ms / period);
+    const f = (ms - i * period) / period;
+    const s = f * f * (3 - 2 * f); // raccord en douceur
+    return knot(i) + (knot(i + 1) - knot(i)) * s;
+  };
 }
 
 /** La charge est-elle dans la zone dorée (bornes incluses) ? */
@@ -14,8 +59,8 @@ export function isGolden(charge: number, zone: readonly [number, number]): boole
 }
 
 /** Surchauffe : la jauge est restée à 100 % plus longtemps que la tolérance. */
-export function isOverheated(heldMs: number, chargeTimeMs: number, speedFactor = 1): boolean {
-  return heldMs > chargeTimeMs / speedFactor + SLAP.overheatGraceMs;
+export function isOverheated(heldMs: number, chargeTimeMs: number, speed: ChargeSpeed = 1): boolean {
+  return heldMs > timeToFull(chargeTimeMs, speed) + SLAP.overheatGraceMs;
 }
 
 /** Facteur V : linéaire de 0,8 à 1,3 entre 0,3 et 2,5 px/ms, borné aux extrémités. */

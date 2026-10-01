@@ -2,7 +2,7 @@
 // L'erreur de timing est en millisecondes (comme un réflexe), pas en % :
 // une jauge plus rapide rend la zone dorée plus difficile à attraper.
 import { FIGHTERS, MATCH, SLAP, type FighterId } from '../config/balance';
-import { chargeAt, isOverheated } from './slap';
+import { chargeAt, isOverheated, timeToFull, type ChargeSpeed } from './slap';
 import { gaussian, uniform, type Rng } from './rng';
 import type { TurnAction } from './match';
 
@@ -64,12 +64,15 @@ export interface AiDecision {
   swipeMs: number;
 }
 
-/** Décide d'un tour complet pour `fighter`, avec la jauge éventuellement accélérée/ralentie. */
-export function aiDecide(rng: Rng, fighter: FighterId, profile: AiProfile, chargeSpeed = 1): AiDecision {
+/**
+ * Décide d'un tour complet pour `fighter`. Si la jauge est irrégulière (perso sonné),
+ * l'IA vise comme d'habitude sans connaître la courbe : comme un joueur, elle se fait piéger.
+ */
+export function aiDecide(rng: Rng, fighter: FighterId, profile: AiProfile, chargeSpeed: ChargeSpeed = 1): AiDecision {
   const f = FIGHTERS[fighter];
-  const tFull = f.chargeTimeMs / chargeSpeed;
+  const tFull = timeToFull(f.chargeTimeMs, chargeSpeed);
   const center = (f.goldenZone[0] + f.goldenZone[1]) / 2;
-  const aim = (center / 100) * tFull;
+  const aim = (center / 100) * f.chargeTimeMs;
   const holdMs = Math.max(60, aim + profile.timingBiasMs + gaussian(rng, 0, profile.timingSdMs));
   const startDelayMs = uniform(rng, profile.reactionMs[0], profile.reactionMs[1]);
   const swipeMs = uniform(rng, profile.swipeMs[0], profile.swipeMs[1]);

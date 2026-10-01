@@ -124,3 +124,21 @@
 **Tests**
 - 3 tests unitaires de plus (71) : facile perd 62–78 %, difficile gagne 52–68 % sur 1000 matchs, mêmes règles pour tous les profils.
 - 3 tests Playwright de plus (22) : le joueur gifle puis l'IA répond seule avec une vraie gifle, touchers ignorés pendant son tour ; match complet perdu contre l'IA difficile → « DÉFAITE… » sans « NIVEAU SUIVANT » ; les 3 niveaux se lancent depuis l'URL.
+
+## Phase 5 · Mécaniques avancées — 2026-10-01
+
+**Fait**
+- **Rage** (`src/logic/match.ts`) : +1 par dégât reçu (gifle, gifle molle, surchauffe), plafonnée à 100, conservée d'un round à l'autre. Pleine, elle débloque la gifle spéciale au tour suivant du perso, puis retombe à 0 au lancement de la spéciale. Une gifle molle ou une surchauffe ne gaspille pas la spéciale.
+- **Gifles spéciales** : Le Battoir (Bernard, une gifle énorme) et La Toupie (Lola, 3 gifles enchaînées à ×0,7). Annonce plein écran, flash rose, ralenti et tremblement renforcés ; La Toupie fait reculer la barre de vie coup par coup, avec un chiffre et une trace de main par gifle.
+- **Sonné** : après un coup de 25 dégâts ou plus, la victime joue son prochain tour avec une jauge irrégulière — vitesse tirée au hasard entre −30 % et +30 %, nouvelle valeur toutes les ~260 ms avec raccords en douceur (`stunCurve`). Étoiles qui tournent au-dessus de la tête et étiquette « SONNÉ ! » jusqu'à la fin de son tour. L'IA subit la même jauge : elle vise sans connaître la courbe.
+- **Interface** : jauge de rage fine sous la barre de vie (rouge, puis rose qui pulse + « RAGE MAX ! ») ; au tour du perso, aura rosée et étiquette « LE BATTOIR PRÊT ! » / « LA TOUPIE PRÊT ! ».
+- Sons : montée « transformation » à la rage pleine et au lancement de la spéciale, gazouillis d'oiseaux quand un perso est sonné. 10 phrases de commentateur en plus (rage, Battoir, Toupie, sonné).
+
+**Équilibrage**
+- Avec les valeurs de la roadmap (Battoir ×1,8, Toupie 3 × 0,7 = ×2,1), Lola passait à 55–56 % de victoires. **Le Battoir passe à ×2,0** : Bernard 48–51 % / Lola 49–52 % sur 3 × 1000 matchs.
+- En moyenne par match : ~3 spéciales, ~5,5 états sonnés, ~90 s, ~26 tours.
+- Paliers de la jauge sonnée à 260 ms plutôt que plus courts : en dessous, les ±30 % se lissent et ne se sentent pas.
+
+**Tests**
+- 15 tests unitaires de plus (86) : rage (gain, plafond, déblocage, conservation), spéciales (dégâts exacts, rage à 0, pas de gaspillage), sonné (seuil de 25, durée d'un tour, bornes et douceur de la courbe, surchauffe selon la courbe), équilibre 40–60 % sur 200 matchs avec ces mécaniques.
+- 4 tests Playwright de plus (26) : rage pleine → RAGE MAX et spéciale prête ; Le Battoir (annonce, dégâts, rage à 0) ; La Toupie (3 chiffres, 3 traces, total des dégâts) ; sonné (étoiles, vitesse de jauge mesurée image par image, état levé après le tour).

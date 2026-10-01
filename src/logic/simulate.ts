@@ -3,6 +3,7 @@ import type { FighterId } from '../config/balance';
 import { aiDecide, AI_PROFILES, type AiProfile } from './ai';
 import { Match, type Side } from './match';
 import { createRng, type Rng } from './rng';
+import { stunCurve } from './slap';
 
 /** Durée d'animation d'un tour à l'écran (bandeau + gifle + réaction), en ms. */
 export const TURN_OVERHEAD_MS = 1300;
@@ -19,6 +20,8 @@ export interface SimResult {
   crits: number;
   selfSlaps: number;
   timeouts: number;
+  specials: number;
+  stuns: number;
 }
 
 export function simulateMatch(
@@ -33,6 +36,8 @@ export function simulateMatch(
   let crits = 0;
   let selfSlaps = 0;
   let timeouts = 0;
+  let specials = 0;
+  let stuns = 0;
   m.startRound();
   ms += ROUND_OVERHEAD_MS;
   while (m.phase !== 'matchOver') {
@@ -43,10 +48,12 @@ export function simulateMatch(
       continue;
     }
     const side = m.turn;
-    const d = aiDecide(rng, m.ids[side], profiles[side]);
+    const d = aiDecide(rng, m.ids[side], profiles[side], m.stunned[side] ? stunCurve(rng) : 1);
     ms += d.startDelayMs + d.holdMs + d.swipeMs + TURN_OVERHEAD_MS;
     for (const e of m.play(d.action)) {
       if (e.type === 'hit' && e.result?.critical) crits++;
+      if (e.type === 'hit' && e.kind === 'special') specials++;
+      if (e.type === 'stunned') stuns++;
       if (e.type === 'selfhit') selfSlaps++;
       if (e.type === 'hit' && e.kind === 'limp') timeouts++;
     }
@@ -61,6 +68,8 @@ export function simulateMatch(
     crits,
     selfSlaps,
     timeouts,
+    specials,
+    stuns,
   };
 }
 
@@ -73,6 +82,8 @@ export interface SimSummary {
   critRate: number;
   selfSlapRate: number;
   timeoutRate: number;
+  specialsPerMatch: number;
+  stunsPerMatch: number;
 }
 
 /**
@@ -88,6 +99,8 @@ export function simulateMany(n: number, seed = 1, profile: AiProfile = AI_PROFIL
   let crits = 0;
   let selfSlaps = 0;
   let timeouts = 0;
+  let specials = 0;
+  let stuns = 0;
   for (let i = 0; i < n; i++) {
     const swap = i % 2 === 1;
     const ids: Record<Side, FighterId> = swap ? { left: 'lola', right: 'bernard' } : { left: 'bernard', right: 'lola' };
@@ -100,6 +113,8 @@ export function simulateMany(n: number, seed = 1, profile: AiProfile = AI_PROFIL
     crits += r.crits;
     selfSlaps += r.selfSlaps;
     timeouts += r.timeouts;
+    specials += r.specials;
+    stuns += r.stuns;
   }
   return {
     matches: n,
@@ -110,6 +125,8 @@ export function simulateMany(n: number, seed = 1, profile: AiProfile = AI_PROFIL
     critRate: crits / turns,
     selfSlapRate: selfSlaps / turns,
     timeoutRate: timeouts / turns,
+    specialsPerMatch: specials / n,
+    stunsPerMatch: stuns / n,
   };
 }
 

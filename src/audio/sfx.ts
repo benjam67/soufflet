@@ -212,6 +212,27 @@ export class Sfx {
     this.noiseBurst(t, 0.8, { type: 'lowpass', freq: 600, gain: 0.08, attack: 0.15 });
   }
 
+  /** Rage pleine : montée qui grince, façon transformation d'anime. */
+  powerUp() {
+    this.log('powerup');
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.tone(t, 0.7, { type: 'sawtooth', freq: 180, freqEnd: 1400, gain: 0.12, attack: 0.05 });
+    this.tone(t + 0.02, 0.7, { type: 'square', freq: 270, freqEnd: 2100, gain: 0.06, attack: 0.05 });
+    this.noiseBurst(t, 0.7, { type: 'bandpass', freq: 600, freqEnd: 5000, q: 3, gain: 0.12, attack: 0.1 });
+  }
+
+  /** Perso sonné : petits gazouillis d'oiseaux. */
+  dizzy() {
+    this.log('dizzy');
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + 0.1;
+    for (let i = 0; i < 5; i++) {
+      const f = 2400 + Math.random() * 900;
+      this.tone(t + i * 0.11, 0.08, { type: 'sine', freq: f, freqEnd: f * 1.25, gain: 0.07, attack: 0.005 });
+    }
+  }
+
   /** Cloche de K.O. */
   ko() {
     this.log('ko');

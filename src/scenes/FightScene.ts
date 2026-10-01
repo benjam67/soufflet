@@ -1,11 +1,11 @@
 import Phaser from 'phaser';
 import assets from '../config/assets.json';
-import { FIGHTERS, MATCH, SLAP, STAGE, type FighterId } from '../config/balance';
+import { ADVANCED, FIGHTERS, MATCH, SLAP, STAGE, type FighterId } from '../config/balance';
 import { CHEEK } from '../config/sprites';
 import type { CommentKind } from '../config/comments';
 import { computeLayout, computeStrike, HABITUES, type StageLayout } from '../logic/layout';
 import { SlapGesture, type GestureOutcome } from '../logic/gesture';
-import { computeSlap, type SlapResult } from '../logic/slap';
+import { chargeAt, computeSlap, stunCurve, type ChargeSpeed, type SlapResult } from '../logic/slap';
 import { Match, other, type MatchEvent, type Side, type TurnAction } from '../logic/match';
 import { aiDecide, AI_PROFILES, LEVEL_LABEL, LEVEL_PROFILE, type AiLevel, type AiProfile } from '../logic/ai';
 import { createRng, type Rng } from '../logic/rng';
@@ -41,6 +41,10 @@ interface Fighter {
   homeX: number;
   /** Traces de main accumulées sur la joue pendant le round. */
   prints: { img: Phaser.GameObjects.Image; dx: number; dy: number }[];
+  /** Étoiles qui tournent autour de la tête quand le perso est sonné. */
+  dizzy: Phaser.GameObjects.Container | null;
+  /** Aura et étiquette quand la spéciale est prête. */
+  readyTag: Phaser.GameObjects.Image | null;
 }
 
 type ScenePhase = 'intro' | 'banner' | 'ready' | 'charging' | 'busy' | 'roundEnd' | 'over';
@@ -84,7 +88,7 @@ export class FightScene extends Phaser.Scene {
   private lastTickSecond = -1;
   private turnsPlayed = 0;
   private slapCount = 0;
-  private lastResult: (SlapResult & { kind: 'slap' }) | { kind: 'selfslap' | 'limp'; damage: number } | null = null;
+  private lastResult: (SlapResult & { kind: 'slap' | 'special' }) | { kind: 'selfslap' | 'limp'; damage: number } | null = null;
   private aiTimers: Phaser.Time.TimerEvent[] = [];
   private frozen = false;
   private slowToken = 0;
@@ -221,7 +225,7 @@ export class FightScene extends Phaser.Scene {
       .setDepth(10);
     const bar = new HealthBar(this, side, FIGHTERS[id].name, FIGHTERS[id].katakana).setDepth(100);
     const pips = new RoundPips(this, side, MATCH.roundsToWin).setDepth(100).setVisible(this.mode !== 'training');
-    return { side, id, sprite, bar, pips, hp: MATCH.hp, pose: 'idle', homeX: 0, prints: [] };
+    return { side, id, sprite, bar, pips, hp: MATCH.hp, pose: 'idle', homeX: 0, prints: [], dizzy: null, readyTag: null };
   }
 
   private applyLayout() {
@@ -285,6 +289,10 @@ export class FightScene extends Phaser.Scene {
       wins: m ? { ...m.wins } : { left: 0, right: 0 },
       winner: m?.winner ?? null,
       timeLeft: Math.max(0, MATCH.turnTimeMs - this.turnElapsed),
+      rage: m ? { ...m.rage } : { left: 0, right: 0 },
+      specialReady: m ? { ...m.specialReady } : { left: false, right: false },
+      stunned: m ? { ...m.stunned } : { left: false, right: false },
+      dizzy: { left: !!this.f.left.dizzy, right: !!this.f.right.dizzy },
     };
     (window.__slap as Record<string, unknown>).fx = {
       ...this.fx.stats,
@@ -358,6 +366,8 @@ export class FightScene extends Phaser.Scene {
       this.f[s].bar.setValue(1, true);
       this.f[s].sprite.x = this.f[s].homeX;
       this.clearPrints(s);
+      this.clearDizzy(s);
+      this.f[s].bar.setRage(m.rage[s] / ADVANCED.rageMax);
       this.setPose(s, 'idle');
     }
     const final = start.round === MATCH.maxRounds || (m.wins.left === MATCH.roundsToWin - 1 && m.wins.right === MATCH.roundsToWin - 1);
@@ -389,6 +399,7 @@ export class FightScene extends Phaser.Scene {
     }
     this.setPhase('banner');
     const d = bannerImage(this, `ban_turn_${this.f[side].id}`, side, 520);
+    if (this.match?.specialReady[side]) this.showReady(side, true);
     this.time.delayedCall(d - 120, () => {
       if (this.phase !== 'banner') return;
       this.turnElapsed = 0;
@@ -460,7 +471,7 @@ export class FightScene extends Phaser.Scene {
     if (this.phase !== 'ready' || this.control[this.attacker] !== 'human') return;
     if (this.soundBtn.getBounds().contains(p.x, p.y)) return;
     const att = this.f[this.attacker];
-    this.gesture = new SlapGesture(att.id, this.attacker === 'left' ? 1 : -1);
+    this.gesture = new SlapGesture(att.id, this.attacker === 'left' ? 1 : -1, this.chargeSpeed(this.attacker));
     const { x, y } = this.css(p);
     this.gesture.down(this.now(p), x, y);
     this.pointerId = p.id;
@@ -513,7 +524,8 @@ export class FightScene extends Phaser.Scene {
 
   private aiTurn(side: Side) {
     const id = this.f[side].id;
-    const d = aiDecide(this.rng, id, this.aiProfile[side]);
+    const speed = this.chargeSpeed(side);
+    const d = aiDecide(this.rng, id, this.aiProfile[side], speed);
     if (d.action.type === 'timeout') return; // l'IA hésite : le chrono tranchera
     const target = d.action.type === 'slap' ? d.action.charge : 100;
     const action = d.action;
@@ -525,13 +537,14 @@ export class FightScene extends Phaser.Scene {
         this.gauge.setValue(0);
         this.gauge.show(true);
         this.setPose(side, 'windup');
-        const holdMs = action.type === 'selfslap' ? d.holdMs : (target / 100) * FIGHTERS[id].chargeTimeMs;
-        const tw = { v: 0 };
+        const holdMs = d.holdMs;
+        const tw = { t: 0 };
+        // La jauge de l'IA suit la même courbe que celle d'un joueur (irrégulière si sonnée).
         this.tweens.add({
           targets: tw,
-          v: target,
+          t: holdMs,
           duration: holdMs,
-          onUpdate: () => this.gauge.setValue(tw.v),
+          onUpdate: () => this.gauge.setValue(Math.min(target, chargeAt(tw.t, FIGHTERS[id].chargeTimeMs, speed))),
         });
         this.aiTimers.push(
           this.time.delayedCall(holdMs + (action.type === 'slap' ? d.swipeMs : 0), () => {
@@ -558,13 +571,127 @@ export class FightScene extends Phaser.Scene {
     this.hint.setVisible(false);
     this.timer.set(null);
     this.turnsPlayed++;
+    // Le perso a joué son tour : s'il était sonné, ses étoiles s'envolent.
+    this.clearDizzy(this.attacker);
     const events = this.match ? this.match.play(action) : this.trainingPlay(action);
     const hit = events.find((e): e is Extract<MatchEvent, { type: 'hit' }> => e.type === 'hit');
     const self = events.find((e): e is Extract<MatchEvent, { type: 'selfhit' }> => e.type === 'selfhit');
-    const after = () => this.afterTurn(events);
-    if (hit) this.slapAnim(hit, after);
+    const after = () => {
+      this.afterHitStatus(events);
+      this.afterTurn(events);
+    };
+    if (hit?.kind === 'special') this.specialAnim(hit, after);
+    else if (hit) this.slapAnim(hit, after);
     else if (self) this.selfSlapAnim(self, after);
     else after();
+  }
+
+  /** Vitesse de la jauge du perso : irrégulière s'il est sonné. */
+  private chargeSpeed(side: Side): ChargeSpeed {
+    return this.match?.stunned[side] ? stunCurve(this.rng) : 1;
+  }
+
+  /** Après un coup : jauges de rage, rage pleine, perso sonné. */
+  private afterHitStatus(events: MatchEvent[]) {
+    const m = this.match;
+    if (!m) return;
+    for (const s of ['left', 'right'] as const) {
+      this.f[s].bar.setRage(m.rage[s] / ADVANCED.rageMax);
+      if (!m.specialReady[s]) this.showReady(s, false);
+    }
+    if (events.some((e) => e.type === 'ko')) return;
+    const rage = events.find((e): e is Extract<MatchEvent, { type: 'rageFull' }> => e.type === 'rageFull');
+    const stun = events.find((e): e is Extract<MatchEvent, { type: 'stunned' }> => e.type === 'stunned');
+    if (stun) {
+      this.addDizzy(stun.side);
+      sfx.dizzy();
+    }
+    if (rage) {
+      sfx.powerUp();
+      this.fx.screenFlash(0.25, COLORS.pink);
+      this.time.delayedCall(stun ? 900 : 0, () => this.say('rage'));
+    }
+    if (stun) this.say('stun');
+    this.publish();
+  }
+
+  /** Aura qui pulse et étiquette « LE BATTOIR PRÊT ! » au-dessus du perso. */
+  private showReady(side: Side, on: boolean) {
+    const f = this.f[side];
+    if (!on) {
+      if (f.readyTag) {
+        f.readyTag.destroy();
+        f.readyTag = null;
+        this.tweens.killTweensOf(f.sprite);
+        f.sprite.clearTint();
+      }
+      return;
+    }
+    if (f.readyTag) return;
+    const top = this.layout[side].top;
+    f.readyTag = this.add.image(f.homeX, top - 18, `lbl_ready_${f.id}`).setDepth(60).setAngle(-4);
+    this.tweens.add({ targets: f.readyTag, y: top - 26, duration: 380, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+    const glow = { v: 0 };
+    this.tweens.add({
+      targets: glow,
+      v: 1,
+      duration: 260,
+      yoyo: true,
+      repeat: -1,
+      onUpdate: () => {
+        const k = glow.v;
+        // Teinte rosée qui pulse (blanc → rose), sans masquer le dessin.
+        const c = Phaser.Display.Color.Interpolate.ColorWithColor(
+          Phaser.Display.Color.ValueToColor(0xffffff),
+          Phaser.Display.Color.ValueToColor(0xff9cc8),
+          100,
+          k * 100,
+        );
+        f.sprite.setTint(Phaser.Display.Color.GetColor(c.r, c.g, c.b));
+      },
+    });
+    this.publish();
+  }
+
+  /** Étoiles qui tournent au-dessus de la tête du perso sonné. */
+  private addDizzy(side: Side) {
+    const f = this.f[side];
+    this.clearDizzy(side);
+    const s = this.layout.fighterScale;
+    const a = assets.fighters[f.id];
+    const dir = side === 'left' ? 1 : -1;
+    const x = f.homeX + dir * (a.face.x - 60) * s;
+    const y = f.sprite.y - (a.face.y + 95) * s;
+    const c = this.add.container(x, y).setDepth(58);
+    const stars = [0, 1, 2].map((i) => this.add.image(0, 0, 'fx_dizzy').setData('a', (i / 3) * Math.PI * 2));
+    c.add(stars);
+    c.add(this.add.image(0, -46, 'lbl_stun').setAngle(-6).setScale(0.8));
+    const spin = { a: 0 };
+    this.tweens.add({
+      targets: spin,
+      a: Math.PI * 2,
+      duration: 1100,
+      repeat: -1,
+      onUpdate: () => {
+        for (const st of stars) {
+          const ang = spin.a + (st.getData('a') as number);
+          st.setPosition(Math.cos(ang) * 52, Math.sin(ang) * 14);
+          st.setScale(0.8 + 0.3 * (Math.sin(ang) + 1) / 2).setDepth(Math.sin(ang));
+        }
+      },
+    });
+    c.setData('spin', spin);
+    f.dizzy = c;
+    this.publish();
+  }
+
+  private clearDizzy(side: Side) {
+    const f = this.f[side];
+    if (!f.dizzy) return;
+    this.tweens.killTweensOf(f.dizzy.getData('spin'));
+    const c = f.dizzy;
+    f.dizzy = null;
+    this.tweens.add({ targets: c, alpha: 0, y: c.y - 30, duration: 250, onComplete: () => c.destroy() });
   }
 
   /** Entraînement : même règles, mais c'est toujours Bernard qui gifle et la vie revient au K.O. */
@@ -621,30 +748,39 @@ export class FightScene extends Phaser.Scene {
     });
   }
 
-  private impact(hit: Extract<MatchEvent, { type: 'hit' }>, k: ReturnType<typeof computeStrike>, done: () => void) {
+  private impact(
+    hit: Extract<MatchEvent, { type: 'hit' }>,
+    k: ReturnType<typeof computeStrike>,
+    done: () => void,
+    opts: { hpAfter?: number; whole?: Extract<MatchEvent, { type: 'hit' }> } = {},
+  ) {
     const attSide = hit.attacker;
     const defSide = hit.defender;
     const att = this.f[attSide];
     const def = this.f[defSide];
     const result = hit.result;
     const limp = hit.kind === 'limp';
-    const crit = !!result?.critical;
-    const contact = limp ? 'limp' : result!.contact;
+    const special = hit.kind === 'special';
+    // Une spéciale se met en scène comme un critique, en plus gros.
+    const crit = !!result?.critical || special;
+    const contact = limp ? 'limp' : special ? 'clean' : result!.contact;
+    const whole = opts.whole ?? hit;
     // Puissance perçue 0–1 : sert à doser tous les effets.
-    const power = Math.min(1, hit.damage / 34);
+    const power = special ? 1 : Math.min(1, hit.damage / 34);
     const dir = k.dir as 1 | -1;
 
     // Contact : la main est sur la joue (pose idle).
-    this.setHp(defSide, def.hp - hit.damage);
+    if (opts.hpAfter !== undefined) this.showHp(defSide, opts.hpAfter);
+    else this.setHp(defSide, def.hp - hit.damage);
     this.slapCount++;
-    this.lastResult = result ? { ...result, kind: 'slap' } : { kind: 'limp', damage: hit.damage };
-    const size = limp ? 0.45 : crit ? 1.35 : contact === 'clean' ? 0.8 + power * 0.4 : 0.6;
+    this.lastResult = result ? { ...result, kind: special ? 'special' : 'slap', damage: whole.damage } : { kind: 'limp', damage: hit.damage };
+    const size = limp ? 0.45 : special ? 1.6 : crit ? 1.35 : contact === 'clean' ? 0.8 + power * 0.4 : 0.6;
     this.fx.flash(k.impactX, k.impactY, size);
     if (!limp && contact !== 'missed') {
       this.fx.focusLines(k.impactX, k.impactY, crit ? 1 : power);
       this.addPrint(defSide);
     }
-    if (crit) this.fx.screenFlash(0.55);
+    if (crit) this.fx.screenFlash(special ? 0.75 : 0.55, special ? COLORS.pink : 0xffffff);
     this.fx.onomatopoeia(limp ? 'limp' : crit ? 'crit' : 'slap', k.impactX, k.impactY, dir);
     sfx.slap(limp ? 0.15 : contact === 'missed' ? 0.25 : 0.35 + power * 0.65, crit);
     this.publish();
@@ -653,14 +789,16 @@ export class FightScene extends Phaser.Scene {
     this.freeze(limp ? 40 : HITSTOP_MS, () => {
       this.setPose(defSide, 'hit');
       const big = hit.damage >= 20 || crit;
-      this.cameras.main.shake(big ? 220 : 110, (big ? 0.014 : 0.006) * (size < 0.7 ? 0.4 : 1));
+      this.cameras.main.shake(special ? 320 : big ? 220 : 110, (special ? 0.02 : big ? 0.014 : 0.006) * (size < 0.7 ? 0.4 : 1));
       if (big) {
-        this.fx.debris(k.impactX, k.impactY, dir, 6 + Math.round(power * 8), hit.damage >= 25 ? (crit ? 3 : 1) : 0);
-        this.slowmo(0.35, 380);
+        this.fx.debris(k.impactX, k.impactY, dir, 6 + Math.round(power * 8), whole.damage >= 25 ? (crit ? 3 : 1) : 0);
+        this.slowmo(special ? 0.25 : 0.35, special ? 520 : 380);
       }
       const label: LabelKey | undefined = limp
         ? 'lbl_limp'
-        : crit
+        : special
+          ? 'lbl_special'
+          : crit
           ? 'lbl_crit'
           : contact === 'grazed'
             ? 'lbl_grazed'
@@ -680,7 +818,7 @@ export class FightScene extends Phaser.Scene {
         sfx.crowd(crit ? 1 : power);
       }
       const ko = def.hp <= 0;
-      if (!ko) this.say(this.commentKind(hit, crit, contact));
+      if (!ko) this.say(this.commentKind(whole, crit, contact));
       this.publish();
 
       this.time.delayedCall(300, () => {
@@ -708,6 +846,7 @@ export class FightScene extends Phaser.Scene {
   }
 
   private commentKind(hit: Extract<MatchEvent, { type: 'hit' }>, crit: boolean, contact: string): CommentKind {
+    if (hit.kind === 'special') return this.f[hit.attacker].id === 'bernard' ? 'battoir' : 'toupie';
     if (hit.kind === 'limp') return 'limp';
     if (crit) return 'crit';
     if (contact === 'missed') return 'missed';
@@ -741,6 +880,81 @@ export class FightScene extends Phaser.Scene {
     this.time.delayedCall(800, () => {
       if (fighter.hp > 0) this.setPose(side, 'idle');
       done();
+    });
+  }
+
+  /** Affiche une valeur de PV précise (coups enchaînés de La Toupie). */
+  private showHp(side: Side, hp: number) {
+    const fighter = this.f[side];
+    fighter.hp = Math.max(0, hp);
+    fighter.bar.setValue(fighter.hp / MATCH.hp);
+  }
+
+  /** Gifle spéciale : annonce, puis Le Battoir (un coup énorme) ou La Toupie (3 coups enchaînés). */
+  private specialAnim(hit: Extract<MatchEvent, { type: 'hit' }>, done: () => void) {
+    const attSide = hit.attacker;
+    const defSide = hit.defender;
+    const att = this.f[attSide];
+    const def = this.f[defSide];
+    this.showReady(attSide, false);
+    sfx.powerUp();
+    this.fx.screenFlash(0.35, COLORS.pink);
+    this.cameras.main.shake(200, 0.004);
+    // La rage est dépensée : la jauge se vide dès l'annonce.
+    att.bar.setRage(0);
+    const d = announceImage(this, `ann_special_${att.id}`, 420, 0.3);
+    // On laisse l'annonce disparaître avant le coup.
+    this.time.delayedCall(d - 80, () => {
+      const hits = hit.special!.hits;
+      if (hits.length === 1) return this.slapAnim(hit, done);
+      // La Toupie : chaque coup fait reculer la barre, le dernier déclenche la grande réaction.
+      const k = computeStrike(this.layout, attSide, att.id, def.id);
+      const startHp = def.hp;
+      let cum = 0;
+      att.sprite.setDepth(11);
+      def.sprite.setDepth(10);
+      const one = (i: number) => {
+        this.setPose(attSide, 'swing');
+        sfx.whoosh();
+        this.time.delayedCall(45, () => {
+          this.setPose(attSide, 'slap');
+          this.tweens.add({
+            targets: att.sprite,
+            x: att.homeX + k.dir * k.step,
+            duration: 60,
+            ease: 'Quad.Out',
+            onComplete: () => {
+              cum += hits[i];
+              const sub = { ...hit, damage: hits[i] };
+              if (i === hits.length - 1) {
+                this.impact(sub, k, done, { hpAfter: startHp - cum, whole: hit });
+                return;
+              }
+              this.chainHit(sub, k, startHp - cum, i, () =>
+                this.tweens.add({ targets: att.sprite, x: att.homeX + k.dir * k.step * 0.35, duration: 70, ease: 'Quad.In', onComplete: () => one(i + 1) }),
+              );
+            },
+          });
+        });
+      };
+      one(0);
+    });
+  }
+
+  /** Coup intermédiaire de La Toupie : éclair, chiffre, trace, son, mini arrêt sur image. */
+  private chainHit(hit: Extract<MatchEvent, { type: 'hit' }>, k: ReturnType<typeof computeStrike>, hpAfter: number, i: number, next: () => void) {
+    const defSide = hit.defender;
+    const dir = k.dir as 1 | -1;
+    this.showHp(defSide, hpAfter);
+    this.fx.flash(k.impactX, k.impactY - i * 10, 0.9);
+    this.addPrint(defSide);
+    this.fx.damageNumber(k.impactX - dir * (45 + i * 40), k.impactY - 95 - i * 30, hit.damage, 'n');
+    sfx.slap(0.7);
+    this.cameras.main.shake(90, 0.008);
+    this.freeze(45, () => {
+      this.setPose(defSide, 'hit');
+      this.tweens.add({ targets: this.f[defSide].sprite, x: this.f[defSide].homeX + dir * 14, duration: 60, yoyo: true });
+      this.time.delayedCall(70, next);
     });
   }
 

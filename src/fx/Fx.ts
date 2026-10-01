@@ -3,7 +3,7 @@ import { digitsImage, ONOMATOPOEIA, type DigitVariant } from './bake';
 import { COLORS } from '../ui/theme';
 
 type OnoKind = keyof typeof ONOMATOPOEIA;
-export type LabelKey = 'lbl_crit' | 'lbl_grazed' | 'lbl_missed' | 'lbl_limp' | 'lbl_self';
+export type LabelKey = 'lbl_crit' | 'lbl_grazed' | 'lbl_missed' | 'lbl_limp' | 'lbl_self' | 'lbl_special' | 'lbl_stun';
 
 /** Compteurs d'effets (lus par les tests pour vérifier que tout se déclenche). */
 export interface FxStats {
