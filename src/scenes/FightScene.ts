@@ -645,7 +645,7 @@ export class FightScene extends Phaser.Scene {
             : contact === 'missed'
               ? 'lbl_missed'
               : undefined;
-      this.fx.damageNumber(k.impactX + dir * 40, k.impactY - 80, hit.damage, crit ? 'c' : 'n', label);
+      this.fx.damageNumber(k.impactX - dir * 45, k.impactY - 95, hit.damage, crit ? 'c' : 'n', label);
       this.tweens.add({ targets: def.sprite, x: def.homeX + dir * (18 + power * 22), duration: 90, yoyo: true, ease: 'Quad.Out' });
       sfx.cry(def.id, limp ? 0.1 : power);
 

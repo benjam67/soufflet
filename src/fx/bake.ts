@@ -17,6 +17,24 @@ const title = (size: number, color: string, stroke = Math.round(size / 7)): Styl
   padding: { x: stroke, y: stroke },
 });
 
+/** Bords horizontaux de l'encre (pixels non transparents) de chaque chiffre pré-rendu. */
+const INK: Record<string, { left: number; right: number }> = {};
+
+function inkBounds(c: HTMLCanvasElement) {
+  const data = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+  let left = c.width;
+  let right = -1;
+  for (let y = 0; y < c.height; y++) {
+    for (let x = 0; x < c.width; x++) {
+      if (data[(y * c.width + x) * 4 + 3] > 24) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+    }
+  }
+  return right < 0 ? { left: 0, right: c.width } : { left, right: right + 1 };
+}
+
 /** Rend un texte dans sa propre texture (canvas copié), puis jette l'objet Text. */
 export function bakeText(scene: Phaser.Scene, key: string, text: string, style: Style) {
   if (scene.textures.exists(key)) return;
@@ -24,7 +42,8 @@ export function bakeText(scene: Phaser.Scene, key: string, text: string, style: 
   const c = document.createElement('canvas');
   c.width = Math.max(1, t.canvas.width);
   c.height = Math.max(1, t.canvas.height);
-  c.getContext('2d')!.drawImage(t.canvas, 0, 0);
+  c.getContext('2d', { willReadFrequently: key.startsWith('dig_') })!.drawImage(t.canvas, 0, 0);
+  if (key.startsWith('dig_')) INK[key] = inkBounds(c);
   scene.textures.addCanvas(key, c);
   t.destroy();
 }
@@ -238,14 +257,16 @@ export function bakeAll(scene: Phaser.Scene) {
 /** Nombre composé de chiffres pré-rendus (aucun rendu de texte pendant le jeu). */
 export function digitsImage(scene: Phaser.Scene, n: number, variant: DigitVariant) {
   const c = scene.add.container(0, 0);
-  const imgs = `${Math.max(0, Math.round(n))}`.split('').map((d) => scene.add.image(0, 0, `dig_${variant}_${d}`).setOrigin(0, 0.5));
-  const overlap = variant === 'c' ? 16 : 13;
-  const total = imgs.reduce((w, im) => w + im.width - overlap, overlap);
+  // Les contours des chiffres se touchent et se chevauchent légèrement, comme un texte d'un seul bloc.
+  const stroke = DIGIT_VARIANTS[variant].strokeThickness ?? 0;
+  const overlap = stroke * 0.45;
+  const keys = `${Math.max(0, Math.round(n))}`.split('').map((d) => `dig_${variant}_${d}`);
+  const inks = keys.map((k) => INK[k] ?? { left: 0, right: scene.textures.get(k).getSourceImage().width });
+  const total = inks.reduce((w, ink) => w + (ink.right - ink.left) - overlap, overlap);
   let x = -total / 2;
-  for (const im of imgs) {
-    im.x = x;
-    x += im.width - overlap;
-  }
-  c.add(imgs);
+  keys.forEach((k, i) => {
+    c.add(scene.add.image(x - inks[i].left, 0, k).setOrigin(0, 0.5));
+    x += inks[i].right - inks[i].left - overlap;
+  });
   return c;
 }

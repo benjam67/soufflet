@@ -103,7 +103,8 @@ export class Fx {
   onomatopoeia(kind: OnoKind, x: number, y: number, dir: number) {
     this.stats.onomatopoeia++;
     // Au-dessus de l'impact, décalée vers la victime : jamais sur le visage de celui qui gifle.
-    const c = this.scene.add.container(x + dir * (kind === 'crit' ? 120 : 80), y - (kind === 'crit' ? 175 : 140)).setDepth(70);
+    // Le chiffre de dégâts garde l'espace juste au-dessus de l'impact.
+    const c = this.scene.add.container(x + dir * (kind === 'crit' ? 230 : 200), y - (kind === 'crit' ? 165 : 130)).setDepth(70);
     const jp = this.scene.add.image(0, 0, `ono_${kind}_jp`);
     const fr = this.scene.add.image(dir * 20, jp.height * 0.42, `ono_${kind}_fr`).setAngle(-6);
     c.add([jp, fr]);

@@ -92,6 +92,9 @@
 - Mesure (processeur ralenti ×4, mobile émulé) : travail du jeu (logique, animations, effets) médiane < 1 ms, p95 6–7 ms, p99 ~10 ms par image, soit moins de la moitié du budget de 16,7 ms d'une image à 60 fps.
 - Limite de la mesure : le bac à sable n'a pas de GPU, WebGL y est rastérisé en logiciel (≈ 8 images/s quoi qu'on affiche). Le temps de rendu mesuré ici n'est donc pas représentatif d'un téléphone ; le 60 fps réel est à confirmer sur ton téléphone.
 - Chargement : 30 fichiers, 1,92 Mo décodés, 1,06 Mo transférés (< 3 Mo).
+- Mesure sur un vrai GPU (navigateur du propriétaire, Apple M1, viewport 844 × 390, démo IA avec tous les effets) : **60 images/s stables, 2 000 images d'affilée, aucune au-dessus de 20 ms**.
+- Chiffres pré-rendus espacés selon leur encre réelle (mesurée au chargement) : rendu identique quelle que soit la police disponible.
+- Placement : chiffre de dégâts juste au-dessus de l'impact, onomatopée projetée derrière la victime (jamais sur le visage de celui qui gifle), dans les deux sens.
 
 **Tests**
 - 8 nouveaux tests Playwright (19 au total), avec captures prises en figeant la boucle du jeu à l'instant exact de l'effet : impact (éclair, focus, onomatopée, son, foule, commentateur), critique (flash, ralenti, gouttes et dents), traces de main qui s'accumulent, sifflet du patron et foule qui bouge, K.O., bouton son mémorisé, poids du chargement, performance.
