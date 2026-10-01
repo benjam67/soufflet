@@ -1,0 +1,28 @@
+{
+  "name": "slap-fighter",
+  "version": "1.0.0",
+  "description": "Slap Fighter – jeu de gifles façon baston anime",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "assets": "node scripts/optimize-assets.mjs",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56",
+    "@types/node": "^26.6.3",
+    "sharp": "^0.35.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  },
+  "private": true,
+  "type": "module"
+}

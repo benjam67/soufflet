@@ -1,0 +1,70 @@
+{
+  "fighterScale": 0.7290400972053463,
+  "fighters": {
+    "bernard": {
+      "width": 805,
+      "height": 597,
+      "originX": 0.5869565217391305,
+      "originY": 0.9877899877899878,
+      "idle": {
+        "height": 545,
+        "left": -285,
+        "right": 79
+      }
+    },
+    "lola": {
+      "width": 431,
+      "height": 561,
+      "originX": 0.7648054145516074,
+      "originY": 0.987012987012987,
+      "idle": {
+        "height": 550,
+        "left": -212,
+        "right": 82
+      }
+    }
+  },
+  "props": {
+    "habitue_vieux_beret": {
+      "width": 146,
+      "height": 460
+    },
+    "habitue_fermier": {
+      "width": 165,
+      "height": 448
+    },
+    "habitue_grandmere": {
+      "width": 127,
+      "height": 464
+    },
+    "habitue_facteur": {
+      "width": 166,
+      "height": 450
+    },
+    "habitue_jeune_siffleur": {
+      "width": 135,
+      "height": 418
+    },
+    "habitue_mecano": {
+      "width": 160,
+      "height": 423
+    },
+    "habitue_boulanger": {
+      "width": 161,
+      "height": 475
+    },
+    "habitue_femme_cardigan": {
+      "width": 103,
+      "height": 385
+    },
+    "patron": {
+      "width": 204,
+      "height": 520
+    },
+    "decor": {
+      "width": 1600,
+      "height": 900,
+      "placeholder": true
+    }
+  }
+}
