@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8"><script type="module">
+import { MusicEngine, SONG, STEP } from '../src/audio/music.ts';
+window.render = async () => {
+  const steps = SONG.length * 16;
+  const dur = steps * STEP + 2;
+  const ctx = new OfflineAudioContext(2, Math.ceil(dur * 44100), 44100);
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.ratio.value = 6;
+  const bus = ctx.createGain(); bus.gain.value = 0.5 * 0.9;
+  bus.connect(comp).connect(ctx.destination);
+  const e = new MusicEngine(ctx, bus);
+  for (let i = 0; i < steps; i++) e.scheduleStep(i, 0.05 + i * STEP);
+  const buf = await ctx.startRendering();
+  const L = buf.getChannelData(0), R = buf.getChannelData(1);
+  let peak = 0, sum = 0, nan = 0;
+  for (let i = 0; i < L.length; i++) { const v = Math.max(Math.abs(L[i]), Math.abs(R[i])); if (Number.isNaN(v)) nan++; peak = Math.max(peak, v); sum += L[i] * L[i]; }
+  // WAV 16 bits stéréo, normalisé à -1 dBFS
+  const norm = 0.89 / peak;
+  const n = L.length, out = new DataView(new ArrayBuffer(44 + n * 4));
+  const w = (o, s) => [...s].forEach((c, i) => out.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); out.setUint32(4, 36 + n * 4, true); w(8, 'WAVE'); w(12, 'fmt '); out.setUint32(16, 16, true);
+  out.setUint16(20, 1, true); out.setUint16(22, 2, true); out.setUint32(24, 44100, true); out.setUint32(28, 44100 * 4, true);
+  out.setUint16(32, 4, true); out.setUint16(34, 16, true); w(36, 'data'); out.setUint32(40, n * 4, true);
+  for (let i = 0; i < n; i++) { out.setInt16(44 + i * 4, Math.max(-1, Math.min(1, L[i] * norm)) * 32767, true); out.setInt16(46 + i * 4, Math.max(-1, Math.min(1, R[i] * norm)) * 32767, true); }
+  const bytes = new Uint8Array(out.buffer); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { seconds: dur, peak, rmsDb: 10 * Math.log10(sum / L.length), nan, wav: btoa(bin) };
+};
+window.ready = true;
+</script>

@@ -98,3 +98,10 @@
 
 **Tests**
 - 8 nouveaux tests Playwright (19 au total), avec captures prises en figeant la boucle du jeu à l'instant exact de l'effet : impact (éclair, focus, onomatopée, son, foule, commentateur), critique (flash, ralenti, gouttes et dents), traces de main qui s'accumulent, sifflet du patron et foule qui bouge, K.O., bouton son mémorisé, poids du chargement, performance.
+
+### Retours du jalon 3 — 2026-10-01
+- **Musique refaite** (`src/audio/music.ts`), sur la demande « fais une ambiance anime » : générique de combat façon anime 90s, 156 BPM, do majeur / la mineur.
+  - Structure : intro (nappe + arpège, puis la batterie arrive), couplet de 8 mesures (La m – Fa – Sol – Do, montée sur Mi majeur), refrain de 8 mesures sur l'enchaînement « royal road » des génériques japonais (Fa – Sol – Mi m – La m, avec Mi majeur avant la résolution). Couplet + refrain en boucle.
+  - Instruments : mélodie (deux dents de scie désaccordées + carré à l'octave, petit glissé d'attaque, vibrato qui arrive sur les notes tenues, écho en croche pointée), guitare saturée en accords de puissance (croches au refrain), basse qui pompe en octaves, nappe et arpège au couplet, batterie complète (grosse caisse, caisse claire, charleston, cymbale, roulements), réverbération.
+  - Mixage mesuré instrument par instrument : la mélodie mène (≈ −21 dB), grosse caisse / basse / guitare juste en dessous. L'ancienne version avait une mélodie 17 dB sous la basse, d'où l'impression d'un bourdonnement sans air.
+  - `npm run music -- fichier.wav` rend le morceau en fichier pour l'écouter hors du jeu.

@@ -1,6 +1,7 @@
 // Sons générés en code (Web Audio), en attendant des fichiers définitifs.
 // Aucun fichier à télécharger : tout est synthétisé à la volée.
 import type { FighterId } from '../config/balance';
+import { MusicPlayer } from './music';
 
 const STORAGE_KEY = 'slap.muted';
 
@@ -10,9 +11,7 @@ export class Sfx {
   private sfxBus!: GainNode;
   private musicBus!: GainNode;
   private noise!: AudioBuffer;
-  private musicTimer: number | null = null;
-  private musicStep = 0;
-  private musicNext = 0;
+  private music: MusicPlayer | null = null;
   muted = false;
   /** Journal des sons joués (lu par les tests). */
   readonly played: string[] = [];
@@ -42,7 +41,7 @@ export class Sfx {
       this.sfxBus = this.ctx.createGain();
       this.sfxBus.connect(comp);
       this.musicBus = this.ctx.createGain();
-      this.musicBus.gain.value = 0.32;
+      this.musicBus.gain.value = 0.5;
       this.musicBus.connect(comp);
       const len = this.ctx.sampleRate * 1.5;
       this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
@@ -235,52 +234,18 @@ export class Sfx {
     this.tone(this.ctx.currentTime, 0.07, { type: 'square', freq: urgent ? 1320 : 880, gain: 0.06, attack: 0.003 });
   }
 
-  // ── Musique : boucle 8 mesures façon générique d'anime 90s ─────────────
+  // ── Musique : générique de combat façon anime 90s (voir music.ts) ─────
 
   startMusic() {
-    if (!this.ctx || this.musicTimer !== null) return;
+    if (!this.ctx) return;
+    this.music ??= new MusicPlayer(this.ctx, this.musicBus);
+    if (this.music.playing) return;
     this.log('music');
-    this.musicStep = 0;
-    this.musicNext = this.ctx.currentTime + 0.1;
-    this.musicTimer = window.setInterval(() => this.scheduleMusic(), 60);
+    this.music.start();
   }
 
   stopMusic() {
-    if (this.musicTimer !== null) window.clearInterval(this.musicTimer);
-    this.musicTimer = null;
-  }
-
-  private scheduleMusic() {
-    if (!this.ctx) return;
-    const bpm = 132;
-    const step = 60 / bpm / 2; // croches
-    // Am – F – C – G (2 mesures chacun), basse en octaves, arpège au lead
-    const chords = [
-      [57, 60, 64],
-      [53, 57, 60],
-      [48, 52, 55],
-      [55, 59, 62],
-    ];
-    const lead = [0, 2, 1, 2, 0, 2, 1, 2];
-    const hz = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
-    while (this.musicNext < this.ctx.currentTime + 0.25) {
-      const s = this.musicStep;
-      const bar = Math.floor(s / 8);
-      const chord = chords[Math.floor(bar / 2) % 4];
-      const t = this.musicNext;
-      // basse
-      const bassNote = chord[0] - 24 + (s % 2 === 1 ? 12 : 0);
-      this.tone(t, step * 0.9, { type: 'square', freq: hz(bassNote), gain: 0.12, attack: 0.005 }, this.musicBus);
-      // lead arpégé (mesures paires) ou mélodie montante (impaires)
-      const note = chord[lead[s % 8]] + 12 + (bar % 2 === 1 && s % 8 >= 6 ? 2 : 0);
-      if (s % 8 !== 3 && s % 8 !== 7) this.tone(t, step * 0.8, { type: 'triangle', freq: hz(note), gain: 0.09, attack: 0.005 }, this.musicBus);
-      // batterie : charleston sur chaque croche, caisse claire sur 2 et 4
-      this.noiseBurst(t, 0.03, { type: 'highpass', freq: 7000, gain: 0.05 }, this.musicBus);
-      if (s % 4 === 2) this.noiseBurst(t, 0.12, { type: 'bandpass', freq: 1800, q: 0.7, gain: 0.16 }, this.musicBus);
-      if (s % 4 === 0) this.tone(t, 0.12, { type: 'sine', freq: 120, freqEnd: 45, gain: 0.3 }, this.musicBus);
-      this.musicNext += step;
-      this.musicStep++;
-    }
+    this.music?.stop();
   }
 }
 
