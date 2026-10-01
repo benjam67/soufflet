@@ -4,7 +4,7 @@ import { collectErrors, expectNoErrors, Finger, getState, SHOTS, waitPhase, wait
 test.describe('phase 1 · la gifle (entraînement)', () => {
   test('appui maintenu + swipe : les PV de Lola baissent et les poses s’enchaînent', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto('./');
+    await page.goto('./?mode=training');
     await waitReady(page);
 
     // Enregistre toutes les poses prises pendant la gifle.
@@ -58,7 +58,7 @@ test.describe('phase 1 · la gifle (entraînement)', () => {
 
   test('gifle parfaite dans la zone dorée : critique ×2', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto('./');
+    await page.goto('./?mode=training');
     await waitReady(page);
     const finger = await Finger.on(page);
     // Fenêtre dorée de Bernard : 80–90 %, soit 140 ms. Le navigateur de test livre les
@@ -91,7 +91,7 @@ test.describe('phase 1 · la gifle (entraînement)', () => {
   });
 
   test('capture de l’armement (jauge visible)', async ({ page }) => {
-    await page.goto('./');
+    await page.goto('./?mode=training');
     await waitReady(page);
     const finger = await Finger.on(page);
     await finger.down(300, 230);
@@ -102,7 +102,7 @@ test.describe('phase 1 · la gifle (entraînement)', () => {
 
   test('surchauffe : Bernard se gifle lui-même (8 dégâts)', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto('./');
+    await page.goto('./?mode=training');
     await waitReady(page);
     const finger = await Finger.on(page);
     await finger.down(300, 230);
@@ -121,7 +121,7 @@ test.describe('phase 1 · la gifle (entraînement)', () => {
 
   test('swipe trop court ou à l’envers : pas de gifle', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto('./');
+    await page.goto('./?mode=training');
     await waitReady(page);
     const finger = await Finger.on(page);
     await finger.down(400, 230);

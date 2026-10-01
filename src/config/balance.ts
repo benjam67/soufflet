@@ -4,6 +4,8 @@ export type FighterId = 'bernard' | 'lola';
 
 export interface FighterBalance {
   name: string;
+  /** Prénom affiché dans les annonces (« À TOI, BERNARD ! »). */
+  short: string;
   katakana: string;
   /** Base B de la formule de dégâts. */
   base: number;
@@ -19,6 +21,7 @@ export interface FighterBalance {
 export const FIGHTERS: Record<FighterId, FighterBalance> = {
   bernard: {
     name: 'Big Bernard',
+    short: 'Bernard',
     katakana: 'ベルナール',
     base: 14,
     chargeTimeMs: 1400,
@@ -28,11 +31,14 @@ export const FIGHTERS: Record<FighterId, FighterBalance> = {
   },
   lola: {
     name: 'Lola Tornade',
+    short: 'Lola',
     katakana: 'ローラ',
-    base: 11,
+    // Valeurs de départ de la roadmap : base 11, résistance 1,1 → Bernard gagnait
+    // ~100 % des matchs simulés. Rééquilibré en phase 2 (voir CHANGELOG).
+    base: 16,
     chargeTimeMs: 1000,
     goldenZone: [76, 92],
-    resistance: 1.1,
+    resistance: 1.0,
     special: { name: 'La Toupie', hits: 3, multiplier: 0.7 },
   },
 };

@@ -81,27 +81,36 @@ describe('facteur de précision P', () => {
 });
 
 describe('formule de dégâts D = B × C/100 × V × P × K × R_d', () => {
+  const B = FIGHTERS.bernard;
+  const L = FIGHTERS.lola;
+
   it('gifle parfaite de Bernard sur Lola', () => {
     const r = computeSlap({ attacker: 'bernard', defender: 'lola', charge: 85, speed: 2.5, angle: 0 });
-    // 14 × 0,85 × 1,3 × 1 × 2 × 1,1 = 34,034
-    expect(r.raw).toBeCloseTo(34.034, 3);
-    expect(r.damage).toBe(34);
+    // B × 0,85 × 1,3 × 1 × 2 × R_d(Lola)
+    expect(r.raw).toBeCloseTo(B.base * 0.85 * 1.3 * 1 * 2 * L.resistance, 10);
+    expect(r.damage).toBe(Math.round(r.raw));
     expect(r.critical).toBe(true);
+    expect(r.factors).toEqual({ B: B.base, C: 85, V: 1.3, P: 1, K: 2, Rd: L.resistance });
     expect(r.contact).toBe('clean');
   });
   it('gifle moyenne de Lola sur Bernard (encaisse mieux)', () => {
     const r = computeSlap({ attacker: 'lola', defender: 'bernard', charge: 60, speed: 1.4, angle: 20 });
-    // 11 × 0,6 × 1,05 × 0,7 × 1 × 0,85 = 4,1233
-    expect(r.raw).toBeCloseTo(4.12335, 4);
-    expect(r.damage).toBe(4);
+    // B × 0,6 × 1,05 × 0,7 (effleurée) × 1 × 0,85
+    expect(r.raw).toBeCloseTo(L.base * 0.6 * 1.05 * 0.7 * 1 * B.resistance, 10);
+    expect(r.damage).toBe(Math.round(r.raw));
     expect(r.critical).toBe(false);
     expect(r.contact).toBe('grazed');
   });
   it('gifle ratée (angle > 35°)', () => {
     const r = computeSlap({ attacker: 'bernard', defender: 'lola', charge: 100, speed: 0.1, angle: 50 });
-    // 14 × 1 × 0,8 × 0,2 × 1 × 1,1 = 2,464
-    expect(r.damage).toBe(2);
+    expect(r.raw).toBeCloseTo(B.base * 1 * 0.8 * 0.2 * 1 * L.resistance, 10);
     expect(r.contact).toBe('missed');
+  });
+  it('arrondit à l’entier le plus proche', () => {
+    // 14 × 0,5 × 0,8 × 1 × 1 × 0,85 = 4,76 → 5 (si Bernard se giflait lui-même via la formule)
+    const r = computeSlap({ attacker: 'bernard', defender: 'bernard', charge: 50, speed: 0.3, angle: 0 });
+    expect(r.raw).toBeCloseTo(B.base * 0.5 * 0.8 * B.resistance, 10);
+    expect(r.damage).toBe(Math.round(r.raw));
   });
   it('charge à 0 : aucun dégât', () => {
     expect(computeSlap({ attacker: 'lola', defender: 'bernard', charge: 0, speed: 2, angle: 0 }).damage).toBe(0);
@@ -111,7 +120,7 @@ describe('formule de dégâts D = B × C/100 × V × P × K × R_d', () => {
   });
   it('multiplicateur supplémentaire pour les spéciales', () => {
     const r = computeSlap({ attacker: 'bernard', defender: 'lola', charge: 50, speed: 0.3, angle: 0, extra: 1.8 });
-    expect(r.raw).toBeCloseTo(14 * 0.5 * 0.8 * 1.1 * 1.8, 10);
+    expect(r.raw).toBeCloseTo(B.base * 0.5 * 0.8 * L.resistance * 1.8, 10);
   });
 });
 

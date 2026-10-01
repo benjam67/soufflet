@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { HABITUES } from '../logic/layout';
 import { loadFonts } from '../ui/theme';
+import type { FightData, Mode } from './FightScene';
 
 export const POSES = ['idle', 'windup', 'swing', 'slap', 'hit', 'dazed', 'victory', 'selfslap'] as const;
 export type Pose = (typeof POSES)[number];
@@ -34,6 +35,22 @@ export class BootScene extends Phaser.Scene {
 
   async create() {
     await loadFonts();
-    this.scene.start('Fight', { mode: 'training' });
+    this.scene.start('Fight', fightDataFromUrl(location.search));
   }
+}
+
+/**
+ * Paramètres d'URL : `?mode=training`, `?autoplay=1` (IA contre IA),
+ * `?speed=4` (tout accélérer), `?seed=42` (IA reproductible). Par défaut : match à deux.
+ */
+export function fightDataFromUrl(search: string): FightData {
+  const q = new URLSearchParams(search);
+  const mode: Mode = q.get('autoplay') === '1' ? 'autoplay' : q.get('mode') === 'training' ? 'training' : 'match';
+  const speed = Number(q.get('speed'));
+  const seed = Number(q.get('seed'));
+  return {
+    mode,
+    speed: Number.isFinite(speed) && speed > 0 ? Math.min(speed, 20) : 1,
+    seed: Number.isFinite(seed) && q.has('seed') ? seed : undefined,
+  };
 }
