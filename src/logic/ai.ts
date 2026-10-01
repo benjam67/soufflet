@@ -23,19 +23,38 @@ export interface AiProfile {
   swipeMs: [number, number];
 }
 
+const AVERAGE: AiProfile = {
+  label: 'Joueur moyen',
+  timingSdMs: 110,
+  timingBiasMs: 0,
+  speedMean: 1.5,
+  speedSd: 0.5,
+  angleSdDeg: 14,
+  reactionMs: [350, 900],
+  swipeMs: [90, 220],
+};
+
+/**
+ * Profils d'IA. Les écarts paraissent petits mais un match compte ~29 gifles :
+ * calibrés par simulation (3 × 1000 matchs contre le joueur moyen, persos et côtés alternés).
+ */
 export const AI_PROFILES = {
-  /** Joueur moyen : référence de l'équilibrage. */
-  average: {
-    label: 'Joueur moyen',
-    timingSdMs: 110,
-    timingBiasMs: 0,
-    speedMean: 1.5,
-    speedSd: 0.5,
-    angleSdDeg: 14,
-    reactionMs: [350, 900],
-    swipeMs: [90, 220],
-  },
+  /** Référence de l'équilibrage (et de la démo IA contre IA). */
+  average: AVERAGE,
+  /** Relâche moins précisément, swipe plus lent et plus de travers : gagne ~30 % contre le joueur moyen. */
+  easy: { ...AVERAGE, label: 'Facile', timingSdMs: 130, speedMean: 1.4, angleSdDeg: 15 },
+  /** Un peu plus précis, plus rapide et plus droit : gagne ~61 % contre le joueur moyen. */
+  hard: { ...AVERAGE, label: 'Difficile', timingSdMs: 105, speedMean: 1.6, angleSdDeg: 13 },
 } satisfies Record<string, AiProfile>;
+
+export type AiLevel = 'easy' | 'normal' | 'hard';
+/** Niveau de jeu du mode solo → profil d'IA (le niveau « normal » est le joueur moyen). */
+export const LEVEL_PROFILE: Record<AiLevel, AiProfile> = {
+  easy: AI_PROFILES.easy,
+  normal: AI_PROFILES.average,
+  hard: AI_PROFILES.hard,
+};
+export const LEVEL_LABEL: Record<AiLevel, string> = { easy: 'FACILE', normal: 'NORMAL', hard: 'DIFFICILE' };
 
 export interface AiDecision {
   action: TurnAction;

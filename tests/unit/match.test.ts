@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Match, type MatchEvent } from '../../src/logic/match';
 import { MATCH, SLAP } from '../../src/config/balance';
-import { simulateMany, simulateMatch } from '../../src/logic/simulate';
+import { simulateMany, simulateMatch, simulateVs } from '../../src/logic/simulate';
 import { createRng } from '../../src/logic/rng';
 import { aiDecide, AI_PROFILES } from '../../src/logic/ai';
 
@@ -181,5 +181,30 @@ describe('simulation de 200 matchs (IA contre IA)', () => {
   it('durée moyenne raisonnable (entre 45 s et 3 min)', () => {
     expect(s.avgSeconds).toBeGreaterThan(45);
     expect(s.avgSeconds).toBeLessThan(180);
+  });
+});
+
+describe('IA à 3 niveaux (simulation contre le joueur moyen)', () => {
+  // 1000 matchs par niveau, persos, côtés et premier joueur alternés.
+  const easy = simulateVs(1000, AI_PROFILES.easy, AI_PROFILES.average, 2026).winRateA;
+  const hard = simulateVs(1000, AI_PROFILES.hard, AI_PROFILES.average, 2026).winRateA;
+
+  it('l’IA facile perd environ 70 % de ses matchs', () => {
+    expect(1 - easy).toBeGreaterThan(0.62);
+    expect(1 - easy).toBeLessThan(0.78);
+  });
+
+  it('l’IA difficile gagne environ 60 % de ses matchs', () => {
+    expect(hard).toBeGreaterThan(0.52);
+    expect(hard).toBeLessThan(0.68);
+  });
+
+  it('les niveaux sont bien ordonnés et jouent avec les mêmes règles', () => {
+    expect(easy).toBeLessThan(0.5);
+    expect(hard).toBeGreaterThan(0.5);
+    // Même jauge, même zone dorée, même chrono : seule la précision humaine simulée change.
+    for (const p of [AI_PROFILES.easy, AI_PROFILES.hard]) {
+      expect(Object.keys(p).sort()).toEqual(Object.keys(AI_PROFILES.average).sort());
+    }
   });
 });

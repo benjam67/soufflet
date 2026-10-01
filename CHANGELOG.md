@@ -105,3 +105,22 @@
   - Instruments : mélodie (deux dents de scie désaccordées + carré à l'octave, petit glissé d'attaque, vibrato qui arrive sur les notes tenues, écho en croche pointée), guitare saturée en accords de puissance (croches au refrain), basse qui pompe en octaves, nappe et arpège au couplet, batterie complète (grosse caisse, caisse claire, charleston, cymbale, roulements), réverbération.
   - Mixage mesuré instrument par instrument : la mélodie mène (≈ −21 dB), grosse caisse / basse / guitare juste en dessous. L'ancienne version avait une mélodie 17 dB sous la basse, d'où l'impression d'un bourdonnement sans air.
   - `npm run music -- fichier.wav` rend le morceau en fichier pour l'écouter hors du jeu.
+
+## Phase 4 · Mode solo — 2026-10-01
+
+**Fait**
+- IA à 3 niveaux (`src/logic/ai.ts`), qui joue avec exactement les mêmes règles que le joueur (même jauge, même zone dorée, même chrono, mêmes dégâts) : seule la précision « humaine » simulée change — erreur de relâchement (écart type en ms), vitesse et angle du swipe.
+  - Facile : σ 130 ms, swipe 1,4 px/ms, angle σ 15°.
+  - Normal : le « joueur moyen » (σ 110 ms, 1,5 px/ms, 14°).
+  - Difficile : σ 105 ms, 1,6 px/ms, 13°.
+- Mode solo : le joueur à gauche (Bernard), l'IA à droite (Lola) ; l'IA arme et gifle seule, les touchers pendant son tour sont ignorés. Étiquette « SOLO · FACILE / NORMAL / DIFFICILE ».
+- Fin de match en solo : « VICTOIRE ! » ou « DÉFAITE… » (bandeau sombre) du point de vue du joueur ; REVANCHE au même niveau ; après une victoire, bouton NIVEAU SUIVANT (facile → normal → difficile).
+- Accès : `?mode=solo&level=easy|normal|hard` (le choix du mode et du perso arrivera avec l'écran titre, phase 7).
+
+**Calibrage** (critère de la roadmap, vérifié par simulation)
+- Un match compte ~29 gifles : un petit écart de précision par gifle devient un gros écart de victoires. Des profils trop différents donnaient 0–3 % ou 90–99 % de victoires ; les valeurs retenues sont très proches du joueur moyen.
+- Facile contre joueur moyen : 30–31 % de victoires, donc **~70 % de défaites**. Difficile contre joueur moyen : **60–62 % de victoires** (3 × 1000 matchs, persos, côtés et premier joueur alternés).
+
+**Tests**
+- 3 tests unitaires de plus (71) : facile perd 62–78 %, difficile gagne 52–68 % sur 1000 matchs, mêmes règles pour tous les profils.
+- 3 tests Playwright de plus (22) : le joueur gifle puis l'IA répond seule avec une vraie gifle, touchers ignorés pendant son tour ; match complet perdu contre l'IA difficile → « DÉFAITE… » sans « NIVEAU SUIVANT » ; les 3 niveaux se lancent depuis l'URL.

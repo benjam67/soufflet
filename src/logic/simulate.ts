@@ -112,3 +112,26 @@ export function simulateMany(n: number, seed = 1, profile: AiProfile = AI_PROFIL
     timeoutRate: timeouts / turns,
   };
 }
+
+/**
+ * Lance `n` matchs profil A contre profil B, en alternant persos, côtés et qui commence.
+ * Renvoie la part de victoires de A.
+ */
+export function simulateVs(n: number, a: AiProfile, b: AiProfile, seed = 1): { winRateA: number; avgSeconds: number } {
+  const rng = createRng(seed);
+  let winsA = 0;
+  let seconds = 0;
+  for (let i = 0; i < n; i++) {
+    const aSide: Side = i % 2 === 0 ? 'left' : 'right';
+    const bSide: Side = aSide === 'left' ? 'right' : 'left';
+    const aId: FighterId = Math.floor(i / 2) % 2 === 0 ? 'bernard' : 'lola';
+    const bId: FighterId = aId === 'bernard' ? 'lola' : 'bernard';
+    const ids = { [aSide]: aId, [bSide]: bId } as Record<Side, FighterId>;
+    const profiles = { [aSide]: a, [bSide]: b } as Record<Side, AiProfile>;
+    const first: Side = Math.floor(i / 4) % 2 === 0 ? 'left' : 'right';
+    const r = simulateMatch(rng, ids, profiles, first);
+    if (r.winner === aSide) winsA++;
+    seconds += r.seconds;
+  }
+  return { winRateA: winsA / n, avgSeconds: seconds / n };
+}

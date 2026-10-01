@@ -7,7 +7,7 @@ import { computeLayout, computeStrike, HABITUES, type StageLayout } from '../log
 import { SlapGesture, type GestureOutcome } from '../logic/gesture';
 import { computeSlap, type SlapResult } from '../logic/slap';
 import { Match, other, type MatchEvent, type Side, type TurnAction } from '../logic/match';
-import { aiDecide, AI_PROFILES } from '../logic/ai';
+import { aiDecide, AI_PROFILES, LEVEL_LABEL, LEVEL_PROFILE, type AiLevel, type AiProfile } from '../logic/ai';
 import { createRng, type Rng } from '../logic/rng';
 import { sfx } from '../audio/sfx';
 import { announceImage, bannerImage, Fx, type LabelKey } from '../fx/Fx';
@@ -18,10 +18,13 @@ import { RoundPips, TimerDiamond } from '../ui/hud';
 import { COLORS, CSS, FONT_TITLE, FONT_UI } from '../ui/theme';
 import { fighterKey, type Pose } from './BootScene';
 
-export type Mode = 'match' | 'training' | 'autoplay';
+export type Mode = 'match' | 'solo' | 'training' | 'autoplay';
+type Controller = 'human' | 'ai';
 
 export interface FightData {
   mode?: Mode;
+  /** Niveau de l'IA en mode solo. */
+  level?: AiLevel;
   /** Accélère tout (animations, chrono, IA) : utile pour les tests et démos. */
   speed?: number;
   seed?: number;
@@ -66,6 +69,10 @@ export class FightScene extends Phaser.Scene {
   layout!: StageLayout;
 
   private mode: Mode = 'match';
+  private level: AiLevel = 'normal';
+  /** Qui joue chaque côté : le joueur (doigt) ou l'IA. */
+  private control: Record<Side, Controller> = { left: 'human', right: 'human' };
+  private aiProfile: Record<Side, AiProfile> = { left: AI_PROFILES.average, right: AI_PROFILES.average };
   private speed = 1;
   private rng: Rng = createRng(1);
   private match: Match | null = null;
@@ -88,6 +95,18 @@ export class FightScene extends Phaser.Scene {
 
   init(data: FightData) {
     this.mode = data.mode ?? 'match';
+    this.level = data.level ?? 'normal';
+    // Solo : le joueur à gauche, l'IA à droite. Démo : deux IA « joueur moyen ».
+    this.control =
+      this.mode === 'solo'
+        ? { left: 'human', right: 'ai' }
+        : this.mode === 'autoplay'
+          ? { left: 'ai', right: 'ai' }
+          : { left: 'human', right: 'human' };
+    this.aiProfile = {
+      left: AI_PROFILES.average,
+      right: this.mode === 'solo' ? LEVEL_PROFILE[this.level] : AI_PROFILES.average,
+    };
     this.speed = data.speed && data.speed > 0 ? data.speed : 1;
     this.rng = createRng(data.seed ?? Math.floor(Math.random() * 1e9));
     this.match = this.mode === 'training' ? null : new Match('bernard', 'lola');
@@ -136,7 +155,7 @@ export class FightScene extends Phaser.Scene {
       .setDepth(100)
       .setVisible(false);
     this.modeLabel = this.add
-      .text(0, 0, this.mode === 'training' ? 'ENTRAÎNEMENT' : 'DÉMO IA', {
+      .text(0, 0, this.mode === 'training' ? 'ENTRAÎNEMENT' : this.mode === 'solo' ? `SOLO · ${LEVEL_LABEL[this.level]}` : 'DÉMO IA', {
         fontFamily: FONT_TITLE,
         fontSize: '20px',
         color: CSS.cream,
@@ -251,6 +270,8 @@ export class FightScene extends Phaser.Scene {
     const m = this.match;
     window.__slap.state = {
       mode: this.mode,
+      level: this.mode === 'solo' ? this.level : null,
+      control: { ...this.control },
       phase: this.phase === 'ready' || this.phase === 'charging' ? this.phase : this.phase === 'over' ? 'over' : 'busy',
       scenePhase: this.phase,
       attacker: this.attacker,
@@ -373,12 +394,13 @@ export class FightScene extends Phaser.Scene {
       this.turnElapsed = 0;
       this.setPhase('ready');
       this.showHint();
-      if (this.mode === 'autoplay') this.aiTurn(side);
+      if (this.control[side] === 'ai') this.aiTurn(side);
     });
   }
 
   private showHint() {
-    const show = this.mode === 'training' || (this.mode === 'match' && this.turnsPlayed < 2);
+    const human = this.control[this.attacker] === 'human';
+    const show = human && (this.mode === 'training' || (this.mode === 'match' && this.turnsPlayed < 2) || (this.mode === 'solo' && this.turnsPlayed < 3));
     if (!show) return this.hint.setVisible(false);
     const def = FIGHTERS[this.f[other(this.attacker)].id].short.toUpperCase();
     const arrow = this.attacker === 'left' ? '→' : '←';
@@ -435,7 +457,7 @@ export class FightScene extends Phaser.Scene {
   }
 
   private onDown(p: Phaser.Input.Pointer) {
-    if (this.phase !== 'ready') return;
+    if (this.phase !== 'ready' || this.control[this.attacker] !== 'human') return;
     if (this.soundBtn.getBounds().contains(p.x, p.y)) return;
     const att = this.f[this.attacker];
     this.gesture = new SlapGesture(att.id, this.attacker === 'left' ? 1 : -1);
@@ -487,11 +509,11 @@ export class FightScene extends Phaser.Scene {
     }
   }
 
-  // ── IA (mode démo) ─────────────────────────────────────────────────────
+  // ── IA (mode solo et démo) ─────────────────────────────────────────────
 
   private aiTurn(side: Side) {
     const id = this.f[side].id;
-    const d = aiDecide(this.rng, id, AI_PROFILES.average);
+    const d = aiDecide(this.rng, id, this.aiProfile[side]);
     if (d.action.type === 'timeout') return; // l'IA hésite : le chrono tranchera
     const target = d.action.type === 'slap' ? d.action.charge : 100;
     const action = d.action;
@@ -830,16 +852,19 @@ export class FightScene extends Phaser.Scene {
     const shade = this.add.rectangle(0, 0, width, height, COLORS.ink, 0.45).setOrigin(0).setDepth(150).setAlpha(0);
     this.tweens.add({ targets: shade, alpha: 1, duration: 300 });
     const band = this.add.rectangle(width / 2, height * 0.24, width * 1.3, 128, COLORS.red).setStrokeStyle(8, COLORS.ink).setAngle(-4);
+    // Solo : on parle du point de vue du joueur (victoire ou défaite contre l'IA).
+    const playerLost = this.mode === 'solo' && this.control[winner] === 'ai';
     const title = this.add
-      .text(width / 2, height * 0.23, 'VICTOIRE !', {
+      .text(width / 2, height * 0.23, playerLost ? 'DÉFAITE…' : 'VICTOIRE !', {
         fontFamily: FONT_TITLE,
         fontSize: '84px',
-        color: CSS.yellow,
+        color: playerLost ? CSS.cream : CSS.yellow,
         stroke: CSS.ink,
         strokeThickness: 14,
       })
       .setOrigin(0.5)
       .setAngle(-4);
+    if (playerLost) band.setFillStyle(COLORS.ink).setStrokeStyle(8, COLORS.red);
     const who = this.add
       .text(width / 2, height * 0.41, `${w.name.toUpperCase()}  ${w.katakana}`, {
         fontFamily: FONT_TITLE,
@@ -862,8 +887,15 @@ export class FightScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setAngle(-4);
     c.add([band, title, who, score]);
-    c.add(this.button(width / 2 - 160, height * 0.88, 'REVANCHE', COLORS.yellow, () => this.scene.restart({ mode: this.mode === 'autoplay' ? 'autoplay' : 'match', speed: this.speed })));
-    c.add(this.button(width / 2 + 160, height * 0.88, 'ENTRAÎNEMENT', COLORS.cyan, () => this.scene.restart({ mode: 'training' })));
+    const again = () => this.scene.restart({ mode: this.mode, level: this.level, speed: this.speed });
+    c.add(this.button(width / 2 - 160, height * 0.88, 'REVANCHE', COLORS.yellow, again));
+    // Solo gagné : on propose le niveau au-dessus.
+    const nextLevel: AiLevel | null = this.mode === 'solo' && !playerLost ? (this.level === 'easy' ? 'normal' : this.level === 'normal' ? 'hard' : null) : null;
+    if (nextLevel) {
+      c.add(this.button(width / 2 + 160, height * 0.88, 'NIVEAU SUIVANT', COLORS.pink, () => this.scene.restart({ mode: 'solo', level: nextLevel, speed: this.speed })));
+    } else {
+      c.add(this.button(width / 2 + 160, height * 0.88, 'ENTRAÎNEMENT', COLORS.cyan, () => this.scene.restart({ mode: 'training' })));
+    }
     this.f[winner].sprite.setDepth(160);
     this.timer.set(null);
     c.setAlpha(0);

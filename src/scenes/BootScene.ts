@@ -3,6 +3,7 @@ import { HABITUES } from '../logic/layout';
 import { loadFonts } from '../ui/theme';
 import { bakeAll } from '../fx/bake';
 import type { FightData, Mode } from './FightScene';
+import type { AiLevel } from '../logic/ai';
 
 export const POSES = ['idle', 'windup', 'swing', 'slap', 'hit', 'dazed', 'victory', 'selfslap'] as const;
 export type Pose = (typeof POSES)[number];
@@ -43,16 +44,20 @@ export class BootScene extends Phaser.Scene {
 }
 
 /**
- * Paramètres d'URL : `?mode=training`, `?autoplay=1` (IA contre IA),
+ * Paramètres d'URL : `?mode=training`, `?mode=solo&level=easy|normal|hard` (contre l'IA), `?autoplay=1` (IA contre IA),
  * `?speed=4` (tout accélérer), `?seed=42` (IA reproductible). Par défaut : match à deux.
  */
 export function fightDataFromUrl(search: string): FightData {
   const q = new URLSearchParams(search);
-  const mode: Mode = q.get('autoplay') === '1' ? 'autoplay' : q.get('mode') === 'training' ? 'training' : 'match';
+  const m = q.get('mode');
+  const mode: Mode = q.get('autoplay') === '1' ? 'autoplay' : m === 'training' ? 'training' : m === 'solo' ? 'solo' : 'match';
+  const lv = q.get('level');
+  const level: AiLevel = lv === 'easy' || lv === 'hard' ? lv : 'normal';
   const speed = Number(q.get('speed'));
   const seed = Number(q.get('seed'));
   return {
     mode,
+    level,
     speed: Number.isFinite(speed) && speed > 0 ? Math.min(speed, 20) : 1,
     seed: Number.isFinite(seed) && q.has('seed') ? seed : undefined,
   };
