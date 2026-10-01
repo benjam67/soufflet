@@ -8,6 +8,7 @@ declare global {
       ready: boolean;
       scene?: string;
       layout?: unknown;
+      state?: Record<string, unknown>;
       game?: Phaser.Game;
     };
   }

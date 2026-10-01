@@ -31,7 +31,7 @@ export default defineConfig({
     : {
         command: 'npm run build && npm run preview',
         url: BASE_URL,
-        reuseExistingServer: true,
+        reuseExistingServer: false,
         timeout: 180_000,
       },
 });

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { HABITUES } from '../logic/layout';
+import { loadFonts } from '../ui/theme';
 
 export const POSES = ['idle', 'windup', 'swing', 'slap', 'hit', 'dazed', 'victory', 'selfslap'] as const;
 export type Pose = (typeof POSES)[number];
@@ -31,7 +32,8 @@ export class BootScene extends Phaser.Scene {
     }
   }
 
-  create() {
-    this.scene.start('Fight');
+  async create() {
+    await loadFonts();
+    this.scene.start('Fight', { mode: 'training' });
   }
 }

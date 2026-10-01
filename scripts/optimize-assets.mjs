@@ -39,6 +39,21 @@ async function alphaBox(file) {
 
 const manifest = { fighterScale: FIGHTER_SCALE, fighters: {}, props: {} };
 
+/** Point non transparent le plus à droite entre les lignes y0 et y1. */
+async function rowsMaxX(file, y0, y1) {
+  const { data, info } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let best = { x: -1, y: 0 };
+  for (let y = Math.max(0, Math.floor(y0)); y < Math.min(info.height, Math.ceil(y1)); y++) {
+    for (let x = info.width - 1; x > best.x; x--) {
+      if (data[(y * info.width + x) * 4 + 3] > 8) {
+        best = { x, y };
+        break;
+      }
+    }
+  }
+  return best;
+}
+
 for (const [name, [W, H]] of Object.entries(FIGHTERS)) {
   const dir = path.join(RAW, 'characters', name);
   let u = { x0: W, y0: H, x1: 0, y1: 0 };
@@ -66,6 +81,11 @@ for (const [name, [W, H]] of Object.entries(FIGHTERS)) {
   // Silhouette idle mesurée depuis l'ancrage (en px de la texture optimisée),
   // pour placer les persos sans les couper ni les faire se chevaucher.
   const idle = await alphaBox(path.join(dir, 'idle.png'));
+  const fig = H - FEET_OFFSET - idle.y0;
+  // Avant du visage en idle (max x dans la bande 6–22 % sous le haut de la silhouette).
+  const face = await rowsMaxX(path.join(dir, 'idle.png'), idle.y0 + fig * 0.06, idle.y0 + fig * 0.22);
+  // Portée de la main en pose slap (point le plus à droite) et sa hauteur.
+  const reach = await rowsMaxX(path.join(dir, 'slap.png'), 0, H);
   manifest.fighters[name] = {
     width: outW,
     height: outH,
@@ -76,6 +96,10 @@ for (const [name, [W, H]] of Object.entries(FIGHTERS)) {
       left: Math.round((idle.x0 - W / 2) * FIGHTER_SCALE),
       right: Math.round((idle.x1 - W / 2) * FIGHTER_SCALE),
     },
+    /** Avant du visage : x depuis l'ancrage, y au-dessus des pieds (px texture). */
+    face: { x: Math.round((face.x - W / 2) * FIGHTER_SCALE), y: Math.round((H - FEET_OFFSET - face.y) * FIGHTER_SCALE) },
+    /** Bout de la main en pose slap : x depuis l'ancrage, y au-dessus des pieds. */
+    reach: { x: Math.round((reach.x - W / 2) * FIGHTER_SCALE), y: Math.round((H - FEET_OFFSET - reach.y) * FIGHTER_SCALE) },
   };
 }
 

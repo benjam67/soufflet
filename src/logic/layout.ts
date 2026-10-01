@@ -139,3 +139,33 @@ export function computeLayout(
     crowdScale,
   };
 }
+
+/** Enfoncement de la main dans le visage au moment de l'impact (px texture). */
+export const STRIKE_OVERLAP = 22;
+
+/**
+ * Pas en avant pour que la main (pose slap) atteigne le visage de l'adversaire,
+ * et point d'impact à l'écran. `step` est une distance positive vers l'adversaire.
+ */
+export function computeStrike(
+  L: StageLayout,
+  attackerSide: 'left' | 'right',
+  attackerId: 'bernard' | 'lola',
+  defenderId: 'bernard' | 'lola',
+) {
+  const s = L.fighterScale;
+  const att = L[attackerSide];
+  const def = L[attackerSide === 'left' ? 'right' : 'left'];
+  const dir = attackerSide === 'left' ? 1 : -1;
+  const A = assets.fighters[attackerId];
+  const D = assets.fighters[defenderId];
+  const faceX = def.x - dir * D.face.x * s; // avant du visage (tourné vers l'attaquant)
+  const handX = att.x + dir * A.reach.x * s;
+  const step = Math.max(0, dir * (faceX - handX) + STRIKE_OVERLAP * s);
+  return {
+    step,
+    dir,
+    impactX: faceX - dir * (STRIKE_OVERLAP * s * 0.5),
+    impactY: def.y - D.face.y * s,
+  };
+}

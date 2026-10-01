@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeLayout } from '../../src/logic/layout';
+import { computeLayout, computeStrike, STRIKE_OVERLAP } from '../../src/logic/layout';
 import { STAGE } from '../../src/config/balance';
 import assets from '../../src/config/assets.json';
 
@@ -59,6 +59,25 @@ describe('placement de la scène', () => {
         expect(L.decor.y).toBeLessThanOrEqual(0);
         expect(L.decor.x + assets.props.decor.width * L.decor.scale).toBeGreaterThanOrEqual(w - 0.01);
         expect(L.decor.y + assets.props.decor.height * L.decor.scale).toBeGreaterThanOrEqual(h - 0.01);
+      });
+
+      it('le pas en avant amène la main sur le visage adverse, dans les deux sens', () => {
+        for (const [side, a, d] of [
+          ['left', 'bernard', 'lola'],
+          ['right', 'lola', 'bernard'],
+        ] as const) {
+          const k = computeStrike(L, side, a, d);
+          const att = L[side];
+          const s = L.fighterScale;
+          const hand = att.x + k.dir * (k.step + assets.fighters[a].reach.x * s);
+          const def = L[side === 'left' ? 'right' : 'left'];
+          const face = def.x - k.dir * assets.fighters[d].face.x * s;
+          expect(k.step).toBeGreaterThan(0);
+          expect(k.dir * (hand - face)).toBeCloseTo(STRIKE_OVERLAP * s, 5);
+          // Impact à hauteur de visage, dans le haut de la silhouette adverse.
+          expect(k.impactY).toBeLessThan(def.y - (def.y - def.top) * 0.6);
+          expect(k.impactY).toBeGreaterThan(def.top);
+        }
       });
     });
   }
