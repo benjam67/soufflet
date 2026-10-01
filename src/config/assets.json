@@ -78,9 +78,9 @@
       "height": 520
     },
     "decor": {
-      "width": 1600,
-      "height": 900,
-      "placeholder": true
+      "width": 1024,
+      "height": 768,
+      "placeholder": false
     }
   }
 }

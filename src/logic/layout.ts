@@ -55,7 +55,7 @@ export function computeLayout(
   const dw = assets.props.decor.width;
   const dh = assets.props.decor.height;
   const ds = Math.max(width / dw, height / dh);
-  const floorScale = STAGE.decorFloorY * (dh / 900);
+  const floorScale = STAGE.decorFloorY;
   const decorX = (width - dw * ds) / 2;
   let decorY = height * STAGE.decorFloorScreen - floorScale * ds;
   decorY = Math.min(0, Math.max(height - dh * ds, decorY));

@@ -86,7 +86,7 @@ export const STAGE = {
   /** Teinte d'assombrissement des habitués et du patron. */
   crowdTint: 0xb3a49c,
   patronTint: 0xd4c6bd,
-  /** Ligne du sol du décor (px dans decor.webp) et position voulue à l'écran. */
-  decorFloorY: 560,
+  /** Ligne du sol au pied du comptoir (px dans decor.webp) et position voulue à l'écran. */
+  decorFloorY: 420,
   decorFloorScreen: 0.56,
 };

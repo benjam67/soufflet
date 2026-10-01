@@ -698,14 +698,19 @@ export class FightScene extends Phaser.Scene {
   }
 
   private button(x: number, y: number, label: string, color: number, onClick: () => void) {
+    const W = 290;
+    const H = 66;
     const c = this.add.container(x, y);
-    const bg = this.add.rectangle(0, 0, 270, 64, color).setStrokeStyle(6, COLORS.ink).setAngle(-3);
+    const bg = this.add.rectangle(0, 0, W, H, color).setStrokeStyle(6, COLORS.ink).setAngle(-3);
     const t = this.add
       .text(0, 0, label, { fontFamily: FONT_TITLE, fontSize: '28px', color: CSS.ink })
       .setOrigin(0.5)
       .setAngle(-3);
+    // Le texte ne déborde jamais du bouton : réduit si la police est plus large que prévu.
+    const maxW = W - 40;
+    if (t.width > maxW) t.setScale(maxW / t.width);
     c.add([bg, t]);
-    c.setSize(270, 64).setInteractive({ useHandCursor: true });
+    c.setSize(W, H).setInteractive({ useHandCursor: true });
     c.on('pointerdown', () => c.setScale(0.94));
     c.on('pointerout', () => c.setScale(1));
     c.on('pointerup', () => {
@@ -715,4 +720,5 @@ export class FightScene extends Phaser.Scene {
     c.setName(`btn-${label}`);
     return c;
   }
+
 }
