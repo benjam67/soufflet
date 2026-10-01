@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { HABITUES } from '../logic/layout';
 import { loadFonts } from '../ui/theme';
+import { bakeAll } from '../fx/bake';
 import type { FightData, Mode } from './FightScene';
 
 export const POSES = ['idle', 'windup', 'swing', 'slap', 'hit', 'dazed', 'victory', 'selfslap'] as const;
@@ -35,6 +36,8 @@ export class BootScene extends Phaser.Scene {
 
   async create() {
     await loadFonts();
+    // Tous les textes à gros contour et les effets sont tracés une fois ici, jamais pendant le jeu.
+    bakeAll(this);
     this.scene.start('Fight', fightDataFromUrl(location.search));
   }
 }

@@ -12,6 +12,7 @@ export class HealthBar extends Phaser.GameObjects.Container {
   private shown = 1; // part affichée (jaune)
   private trail = 1; // part « dégâts récents » (rouge), rattrape le jaune
   private target = 1;
+  private trailPx = -1;
   private barW = 400;
   private readonly barH = 30;
   private readonly slant = 16;
@@ -68,7 +69,12 @@ export class HealthBar extends Phaser.GameObjects.Container {
   preUpdate(_t: number, dt: number) {
     if (this.trail > this.shown) {
       this.trail = Math.max(this.shown, this.trail - dt * 0.0006);
-      this.redraw();
+      // ~1 px de barre par redessin, pas plus souvent.
+      const px = Math.round(this.trail * this.barW);
+      if (px !== this.trailPx) {
+        this.trailPx = px;
+        this.redraw();
+      }
     }
   }
 

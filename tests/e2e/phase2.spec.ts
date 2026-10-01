@@ -61,7 +61,6 @@ test.describe('phase 2 · le match', () => {
     const lolaHp = s.hp.right;
 
     await waitTurn(page, 'right');
-    await page.screenshot({ path: `${SHOTS}/phase2-tour-lola.png` });
     // Lola est à droite : elle gifle vers la gauche.
     await slap(page, finger, 600, 340);
     await waitTurn(page, 'left');

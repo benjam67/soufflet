@@ -1,16 +1,20 @@
 import Phaser from 'phaser';
 import assets from '../config/assets.json';
 import { FIGHTERS, MATCH, SLAP, STAGE, type FighterId } from '../config/balance';
+import { CHEEK } from '../config/sprites';
+import type { CommentKind } from '../config/comments';
 import { computeLayout, computeStrike, HABITUES, type StageLayout } from '../logic/layout';
 import { SlapGesture, type GestureOutcome } from '../logic/gesture';
 import { computeSlap, type SlapResult } from '../logic/slap';
 import { Match, other, type MatchEvent, type Side, type TurnAction } from '../logic/match';
 import { aiDecide, AI_PROFILES } from '../logic/ai';
 import { createRng, type Rng } from '../logic/rng';
+import { sfx } from '../audio/sfx';
+import { announceImage, bannerImage, Fx, type LabelKey } from '../fx/Fx';
+import { Commentator, Crowd } from '../fx/Crowd';
 import { ChargeGauge } from '../ui/ChargeGauge';
 import { HealthBar } from '../ui/HealthBar';
-import { bigAnnounce, RoundPips, TimerDiamond, turnBanner } from '../ui/hud';
-import { flashText, popDamage } from '../ui/popups';
+import { RoundPips, TimerDiamond } from '../ui/hud';
 import { COLORS, CSS, FONT_TITLE, FONT_UI } from '../ui/theme';
 import { fighterKey, type Pose } from './BootScene';
 
@@ -32,12 +36,16 @@ interface Fighter {
   hp: number;
   pose: Pose;
   homeX: number;
+  /** Traces de main accumulées sur la joue pendant le round. */
+  prints: { img: Phaser.GameObjects.Image; dx: number; dy: number }[];
 }
 
 type ScenePhase = 'intro' | 'banner' | 'ready' | 'charging' | 'busy' | 'roundEnd' | 'over';
 
 /** Arrêt sur image au contact, avant la réaction (direction artistique : 80 ms). */
 const HITSTOP_MS = 80;
+/** Nombre maximal de traces de main visibles par joue. */
+const MAX_PRINTS = 6;
 
 /**
  * Scène de combat : match à deux sur le même téléphone, entraînement, ou démo IA contre IA.
@@ -45,12 +53,16 @@ const HITSTOP_MS = 80;
 export class FightScene extends Phaser.Scene {
   private decor!: Phaser.GameObjects.Image;
   private patron!: Phaser.GameObjects.Image;
-  private crowd: Phaser.GameObjects.Image[] = [];
+  private crowdImgs: Phaser.GameObjects.Image[] = [];
   private f!: Record<Side, Fighter>;
   private gauge!: ChargeGauge;
   private timer!: TimerDiamond;
   private hint!: Phaser.GameObjects.Text;
   private modeLabel!: Phaser.GameObjects.Text;
+  private soundBtn!: Phaser.GameObjects.Image;
+  private fx!: Fx;
+  private crowd!: Crowd;
+  private commentator!: Commentator;
   layout!: StageLayout;
 
   private mode: Mode = 'match';
@@ -62,10 +74,13 @@ export class FightScene extends Phaser.Scene {
   private gesture: SlapGesture | null = null;
   private pointerId = -1;
   private turnElapsed = 0;
+  private lastTickSecond = -1;
   private turnsPlayed = 0;
   private slapCount = 0;
   private lastResult: (SlapResult & { kind: 'slap' }) | { kind: 'selfslap' | 'limp'; damage: number } | null = null;
   private aiTimers: Phaser.Time.TimerEvent[] = [];
+  private frozen = false;
+  private slowToken = 0;
 
   constructor() {
     super('Fight');
@@ -80,18 +95,20 @@ export class FightScene extends Phaser.Scene {
     this.phase = 'intro';
     this.gesture = null;
     this.turnElapsed = 0;
+    this.lastTickSecond = -1;
     this.turnsPlayed = 0;
     this.slapCount = 0;
     this.lastResult = null;
     this.aiTimers = [];
+    this.frozen = false;
+    this.slowToken = 0;
   }
 
   create() {
-    this.time.timeScale = this.speed;
-    this.tweens.timeScale = this.speed;
+    this.setTimeScale(1);
 
     this.decor = this.add.image(0, 0, 'decor').setOrigin(0, 0);
-    this.crowd = HABITUES.map((id) =>
+    this.crowdImgs = HABITUES.map((id) =>
       this.add.image(0, 0, `habitue_${id}`).setOrigin(0.5, 1).setTint(STAGE.crowdTint),
     );
     this.patron = this.add.image(0, 0, 'patron').setOrigin(0.5, 1).setTint(STAGE.patronTint);
@@ -101,6 +118,9 @@ export class FightScene extends Phaser.Scene {
       right: this.makeFighter('right', 'lola'),
     };
 
+    this.fx = new Fx(this);
+    this.crowd = new Crowd(this, this.crowdImgs, this.patron);
+    this.commentator = new Commentator(this);
     this.gauge = new ChargeGauge(this).setDepth(100);
     this.timer = new TimerDiamond(this).setDepth(100);
     this.hint = this.add
@@ -129,10 +149,29 @@ export class FightScene extends Phaser.Scene {
       .setVisible(this.mode !== 'match');
     this.timer.setVisible(this.mode !== 'training');
 
+    this.soundBtn = this.add
+      .image(0, 0, sfx.muted ? 'ico_sound_off' : 'ico_sound_on')
+      .setDepth(110)
+      .setInteractive({ useHandCursor: true });
+    this.soundBtn.on('pointerup', () => {
+      sfx.unlock();
+      sfx.setMuted(!sfx.muted);
+      this.soundBtn.setTexture(sfx.muted ? 'ico_sound_off' : 'ico_sound_on');
+      if (!sfx.muted) sfx.startMusic();
+    });
+
     this.applyLayout();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.applyLayout, this);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off(Phaser.Scale.Events.RESIZE, this.applyLayout, this));
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, this.applyLayout, this);
+      this.slowToken++;
+    });
 
+    // Le son ne peut démarrer qu'après un geste de l'utilisateur.
+    this.input.on(Phaser.Input.Events.POINTER_DOWN, () => {
+      sfx.unlock();
+      sfx.startMusic();
+    });
     if (this.mode !== 'autoplay') {
       this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onDown, this);
       this.input.on(Phaser.Input.Events.POINTER_MOVE, this.onMove, this);
@@ -163,7 +202,7 @@ export class FightScene extends Phaser.Scene {
       .setDepth(10);
     const bar = new HealthBar(this, side, FIGHTERS[id].name, FIGHTERS[id].katakana).setDepth(100);
     const pips = new RoundPips(this, side, MATCH.roundsToWin).setDepth(100).setVisible(this.mode !== 'training');
-    return { side, id, sprite, bar, pips, hp: MATCH.hp, pose: 'idle', homeX: 0 };
+    return { side, id, sprite, bar, pips, hp: MATCH.hp, pose: 'idle', homeX: 0, prints: [] };
   }
 
   private applyLayout() {
@@ -174,12 +213,14 @@ export class FightScene extends Phaser.Scene {
 
     this.decor.setPosition(L.decor.x, L.decor.y).setScale(L.decor.scale);
     this.patron.setPosition(L.patron.x, L.patron.y).setScale(L.patron.scale);
-    L.crowd.forEach((c, i) => this.crowd[i].setPosition(c.x, c.y).setScale(c.scale));
+    L.crowd.forEach((c, i) => this.crowdImgs[i].setPosition(c.x, c.y).setScale(c.scale));
+    this.crowd.layout();
     for (const side of ['left', 'right'] as const) {
       const p = L[side];
       const fighter = this.f[side];
       fighter.homeX = p.x;
       fighter.sprite.setPosition(p.x, p.y).setScale(p.scale);
+      this.placePrints(side);
     }
 
     // Interface : barres en haut, chrono au centre, losanges des rounds sous les barres.
@@ -194,8 +235,11 @@ export class FightScene extends Phaser.Scene {
     this.f.right.pips.setPosition(width / 2 + centerGap + 20, 66);
     this.timer.setPosition(width / 2, 48);
     this.gauge.layout(margin + 6, height * 0.3, height * 0.52);
-    this.hint.setPosition(width / 2, height - 12);
+    this.hint.setPosition(width / 2, height - 58);
     this.modeLabel.setPosition(width / 2, this.mode === 'training' ? 14 : 96);
+    this.soundBtn.setPosition(width - 44, 120);
+    this.fx.layout(width, height);
+    this.commentator.layout(width, height);
 
     if (window.__slap) window.__slap.layout = L;
   }
@@ -221,18 +265,63 @@ export class FightScene extends Phaser.Scene {
       winner: m?.winner ?? null,
       timeLeft: Math.max(0, MATCH.turnTimeMs - this.turnElapsed),
     };
+    (window.__slap as Record<string, unknown>).fx = {
+      ...this.fx.stats,
+      ...this.crowd.stats,
+      ...this.commentator.stats,
+      handprints: { left: this.f.left.prints.length, right: this.f.right.prints.length },
+      sounds: sfx.played.slice(-30),
+      frozen: this.frozen,
+      timeScale: this.tweens.timeScale / this.speed,
+    };
   }
 
   setPose(side: Side, pose: Pose) {
     const fighter = this.f[side];
     fighter.pose = pose;
     fighter.sprite.setTexture(fighterKey(fighter.id, pose));
+    // Les traces de main sont calées sur la joue de la pose idle.
+    for (const p of fighter.prints) p.img.setVisible(pose === 'idle');
     this.publish();
   }
 
   private setPhase(phase: ScenePhase) {
     this.phase = phase;
     this.publish();
+  }
+
+  // ── Temps : arrêt sur image et ralenti ─────────────────────────────────
+
+  private setTimeScale(factor: number) {
+    this.time.timeScale = this.speed * factor;
+    this.tweens.timeScale = this.speed * factor;
+  }
+
+  /** Arrêt sur image : tout se fige `ms` millisecondes (temps réel), puis `then`. */
+  private freeze(ms: number, then: () => void) {
+    this.frozen = true;
+    this.tweens.pauseAll();
+    this.time.paused = true;
+    this.publish();
+    window.setTimeout(() => {
+      if (!this.sys.isActive()) return;
+      this.frozen = false;
+      this.time.paused = false;
+      this.tweens.resumeAll();
+      then();
+    }, ms / this.speed);
+  }
+
+  /** Ralenti : tout tourne à `factor` pendant `realMs` millisecondes réelles. */
+  private slowmo(factor: number, realMs: number) {
+    const token = ++this.slowToken;
+    this.setTimeScale(factor);
+    this.publish();
+    window.setTimeout(() => {
+      if (token !== this.slowToken || !this.sys.isActive()) return;
+      this.setTimeScale(1);
+      this.publish();
+    }, realMs / this.speed);
   }
 
   // ── Rounds et tours ────────────────────────────────────────────────────
@@ -247,19 +336,29 @@ export class FightScene extends Phaser.Scene {
       this.f[s].hp = m.hp[s];
       this.f[s].bar.setValue(1, true);
       this.f[s].sprite.x = this.f[s].homeX;
+      this.clearPrints(s);
       this.setPose(s, 'idle');
     }
     const final = start.round === MATCH.maxRounds || (m.wins.left === MATCH.roundsToWin - 1 && m.wins.right === MATCH.roundsToWin - 1);
-    const d1 = bigAnnounce(this, final ? 'ROUND FINAL' : `ROUND ${start.round}`, CSS.yellow, 650);
-    this.time.delayedCall(d1, () => {
-      const d2 = bigAnnounce(this, 'BAGARRE !', CSS.pink, 450, 120);
-      this.time.delayedCall(d2 - 150, () => this.beginTurn(start.first));
+    // Le patron siffle, puis annonce le round.
+    this.crowd.whistle();
+    sfx.whistle();
+    if (start.round === 1) this.say('roundStart');
+    this.time.delayedCall(350, () => {
+      const d1 = announceImage(this, final ? 'ann_round_final' : `ann_round_${start.round}`, 650);
+      this.time.delayedCall(d1, () => {
+        const d2 = announceImage(this, 'ann_fight', 450);
+        this.crowd.cheer(0.5);
+        sfx.crowd(0.5, 0.8);
+        this.time.delayedCall(d2 - 150, () => this.beginTurn(start.first));
+      });
     });
   }
 
   private beginTurn(side: Side) {
     this.attacker = side;
     this.turnElapsed = 0;
+    this.lastTickSecond = -1;
     this.gesture = null;
     this.timer.set(null);
     if (this.mode === 'training') {
@@ -268,7 +367,7 @@ export class FightScene extends Phaser.Scene {
       return;
     }
     this.setPhase('banner');
-    const d = turnBanner(this, `À TOI, ${FIGHTERS[this.f[side].id].short.toUpperCase()} !`, side, 520);
+    const d = bannerImage(this, `ban_turn_${this.f[side].id}`, side, 520);
     this.time.delayedCall(d - 120, () => {
       if (this.phase !== 'banner') return;
       this.turnElapsed = 0;
@@ -286,11 +385,15 @@ export class FightScene extends Phaser.Scene {
     this.hint.setText(`MAINTIENS pour armer  ·  GLISSE vers ${def} ${arrow}`).setVisible(true);
   }
 
-  update(_time: number, delta: number) {
+  update(time: number, delta: number) {
+    if (!this.frozen) this.crowd.update(time);
     if (this.match && (this.phase === 'ready' || this.phase === 'charging')) {
       this.turnElapsed += delta * this.speed;
       const left = MATCH.turnTimeMs - this.turnElapsed;
       this.timer.set(Math.max(0, left) / 1000, Math.max(0, left) / MATCH.turnTimeMs);
+      const sec = Math.ceil(Math.max(0, left) / 1000);
+      if (sec !== this.lastTickSecond && sec <= 2 && sec > 0) sfx.tick(sec <= 1);
+      this.lastTickSecond = sec;
       // Chrono écoulé : gifle molle automatique (sauf swipe déjà lancé, qu'on laisse finir).
       if (left <= 0 && this.gesture?.phase !== 'swiping') {
         this.timeout();
@@ -333,6 +436,7 @@ export class FightScene extends Phaser.Scene {
 
   private onDown(p: Phaser.Input.Pointer) {
     if (this.phase !== 'ready') return;
+    if (this.soundBtn.getBounds().contains(p.x, p.y)) return;
     const att = this.f[this.attacker];
     this.gesture = new SlapGesture(att.id, this.attacker === 'left' ? 1 : -1);
     const { x, y } = this.css(p);
@@ -368,10 +472,7 @@ export class FightScene extends Phaser.Scene {
       this.setPose(this.attacker, 'idle');
       this.setPhase('ready');
       this.showHint();
-      if (out.reason !== 'no-swipe') {
-        const def = FIGHTERS[this.f[other(this.attacker)].id].short.toUpperCase();
-        flashText(this, this.scale.width / 2, this.scale.height * 0.5, `PLUS FORT, VERS ${def} !`, CSS.cream, 34);
-      }
+      if (out.reason !== 'no-swipe') announceImage(this, `ann_harder_${this.f[other(this.attacker)].id}`, 500, 0.5);
       return;
     }
     this.gesture = null;
@@ -485,6 +586,7 @@ export class FightScene extends Phaser.Scene {
     def.sprite.setDepth(10);
 
     this.setPose(attSide, 'swing');
+    if (!limp) sfx.whoosh();
     this.time.delayedCall(limp ? 160 : 60, () => {
       this.setPose(attSide, 'slap');
       this.tweens.add({
@@ -504,47 +606,91 @@ export class FightScene extends Phaser.Scene {
     const def = this.f[defSide];
     const result = hit.result;
     const limp = hit.kind === 'limp';
+    const crit = !!result?.critical;
+    const contact = limp ? 'limp' : result!.contact;
+    // Puissance perçue 0–1 : sert à doser tous les effets.
+    const power = Math.min(1, hit.damage / 34);
+    const dir = k.dir as 1 | -1;
 
-    // Contact : la main est sur la joue (pose idle), arrêt sur image puis réaction.
+    // Contact : la main est sur la joue (pose idle).
     this.setHp(defSide, def.hp - hit.damage);
     this.slapCount++;
     this.lastResult = result ? { ...result, kind: 'slap' } : { kind: 'limp', damage: hit.damage };
-    const size = limp ? 0.45 : result!.critical ? 1.3 : result!.contact === 'clean' ? 1 : 0.6;
-    this.burst(k.impactX, k.impactY, size);
+    const size = limp ? 0.45 : crit ? 1.35 : contact === 'clean' ? 0.8 + power * 0.4 : 0.6;
+    this.fx.flash(k.impactX, k.impactY, size);
+    if (!limp && contact !== 'missed') {
+      this.fx.focusLines(k.impactX, k.impactY, crit ? 1 : power);
+      this.addPrint(defSide);
+    }
+    if (crit) this.fx.screenFlash(0.55);
+    this.fx.onomatopoeia(limp ? 'limp' : crit ? 'crit' : 'slap', k.impactX, k.impactY, dir);
+    sfx.slap(limp ? 0.15 : contact === 'missed' ? 0.25 : 0.35 + power * 0.65, crit);
     this.publish();
 
-    this.time.delayedCall(HITSTOP_MS, () => {
+    // Arrêt sur image, puis réaction.
+    this.freeze(limp ? 40 : HITSTOP_MS, () => {
       this.setPose(defSide, 'hit');
-      const big = hit.damage >= 20;
-      this.cameras.main.shake(big ? 180 : 110, (big ? 0.012 : 0.006) * (size < 0.7 ? 0.4 : 1));
-      const label = limp
-        ? 'GIFLE MOLLE…'
-        : result!.critical
-          ? undefined
-          : result!.contact === 'grazed'
-            ? 'EFFLEURÉE'
-            : result!.contact === 'missed'
-              ? 'RATÉE…'
+      const big = hit.damage >= 20 || crit;
+      this.cameras.main.shake(big ? 220 : 110, (big ? 0.014 : 0.006) * (size < 0.7 ? 0.4 : 1));
+      if (big) {
+        this.fx.debris(k.impactX, k.impactY, dir, 6 + Math.round(power * 8), hit.damage >= 25 ? (crit ? 3 : 1) : 0);
+        this.slowmo(0.35, 380);
+      }
+      const label: LabelKey | undefined = limp
+        ? 'lbl_limp'
+        : crit
+          ? 'lbl_crit'
+          : contact === 'grazed'
+            ? 'lbl_grazed'
+            : contact === 'missed'
+              ? 'lbl_missed'
               : undefined;
-      popDamage(this, k.impactX + k.dir * 40, k.impactY - 80, hit.damage, { critical: result?.critical, label });
-      this.tweens.add({ targets: def.sprite, x: def.homeX + k.dir * 18, duration: 90, yoyo: true, ease: 'Quad.Out' });
-    });
+      this.fx.damageNumber(k.impactX + dir * 40, k.impactY - 80, hit.damage, crit ? 'c' : 'n', label);
+      this.tweens.add({ targets: def.sprite, x: def.homeX + dir * (18 + power * 22), duration: 90, yoyo: true, ease: 'Quad.Out' });
+      sfx.cry(def.id, limp ? 0.1 : power);
 
-    this.time.delayedCall(HITSTOP_MS + 300, () => {
-      this.tweens.add({
-        targets: att.sprite,
-        x: att.homeX,
-        duration: 200,
-        ease: 'Quad.InOut',
-        onComplete: () => {
-          if (att.pose === 'slap') this.setPose(attSide, 'idle');
-        },
+      // Foule et commentateur
+      if (limp || contact === 'missed') {
+        this.crowd.boo();
+        sfx.boo();
+      } else {
+        this.crowd.cheer(crit ? 1 : power);
+        sfx.crowd(crit ? 1 : power);
+      }
+      const ko = def.hp <= 0;
+      if (!ko) this.say(this.commentKind(hit, crit, contact));
+      this.publish();
+
+      this.time.delayedCall(300, () => {
+        this.tweens.add({
+          targets: att.sprite,
+          x: att.homeX,
+          duration: 200,
+          ease: 'Quad.InOut',
+          onComplete: () => {
+            if (att.pose === 'slap') this.setPose(attSide, 'idle');
+          },
+        });
+      });
+      this.time.delayedCall(560, () => {
+        if (def.hp > 0) this.setPose(defSide, 'idle');
+        done();
       });
     });
-    this.time.delayedCall(HITSTOP_MS + 560, () => {
-      if (def.hp > 0) this.setPose(defSide, 'idle');
-      done();
-    });
+  }
+
+  /** Le commentateur parle (et l'état publié pour les tests est mis à jour). */
+  private say(kind: CommentKind) {
+    this.commentator.say(kind);
+    this.publish();
+  }
+
+  private commentKind(hit: Extract<MatchEvent, { type: 'hit' }>, crit: boolean, contact: string): CommentKind {
+    if (hit.kind === 'limp') return 'limp';
+    if (crit) return 'crit';
+    if (contact === 'missed') return 'missed';
+    if (contact === 'grazed') return 'grazed';
+    return hit.damage >= 20 ? 'big' : 'normal';
   }
 
   private selfSlapAnim(e: Extract<MatchEvent, { type: 'selfhit' }>, done: () => void) {
@@ -559,9 +705,16 @@ export class FightScene extends Phaser.Scene {
     // La main se pose sur la joue, un peu en retrait de l'avant du visage.
     const fx = fighter.homeX + dir * (a.face.x - 55) * s;
     const fy = fighter.sprite.y - a.face.y * s;
-    this.cameras.main.shake(120, 0.006);
-    this.burst(fx, fy, 0.7);
-    popDamage(this, fx, fy - 70, e.damage, { label: 'SURCHAUFFE !', color: CSS.red });
+    this.cameras.main.shake(140, 0.007);
+    this.fx.flash(fx, fy, 0.7);
+    this.fx.onomatopoeia('self', fx, fy, dir);
+    this.fx.damageNumber(fx, fy - 80, e.damage, 'r', 'lbl_self');
+    this.addPrint(side);
+    sfx.slap(0.5);
+    sfx.cry(fighter.id, 0.5);
+    this.crowd.cheer(0.6);
+    sfx.crowd(0.6);
+    if (fighter.hp > 0) this.say('self');
     this.publish();
     this.time.delayedCall(800, () => {
       if (fighter.hp > 0) this.setPose(side, 'idle');
@@ -575,29 +728,43 @@ export class FightScene extends Phaser.Scene {
     fighter.bar.setValue(fighter.hp / MATCH.hp);
   }
 
-  /** Éclair blanc et orange en étoile (version simple). */
-  private burst(x: number, y: number, size: number) {
-    const g = this.add.graphics().setDepth(40).setPosition(x, y);
-    const star = (r: number, color: number, spikes = 10) => {
-      g.fillStyle(color, 1);
-      g.beginPath();
-      for (let i = 0; i <= spikes * 2; i++) {
-        const a = (i / (spikes * 2)) * Math.PI * 2 + Math.random() * 0.15;
-        const rr = i % 2 ? r * 0.42 : r * (0.85 + Math.random() * 0.3);
-        const px = Math.cos(a) * rr;
-        const py = Math.sin(a) * rr;
-        if (i === 0) g.moveTo(px, py);
-        else g.lineTo(px, py);
-      }
-      g.closePath();
-      g.fillPath();
-    };
-    star(95, COLORS.yellow);
-    star(70, 0xff8a1f);
-    star(42, 0xffffff, 8);
-    g.setScale(0.3 * size).setAngle(Math.random() * 40);
-    this.tweens.add({ targets: g, scale: size, duration: 90, ease: 'Quad.Out' });
-    this.tweens.add({ targets: g, alpha: 0, delay: 110, duration: 160, onComplete: () => g.destroy() });
+  // ── Traces de main sur la joue ─────────────────────────────────────────
+
+  private addPrint(side: Side) {
+    const fighter = this.f[side];
+    if (fighter.prints.length >= MAX_PRINTS) {
+      // On recycle la plus ancienne : la joue est déjà bien rouge.
+      const old = fighter.prints.shift()!;
+      old.img.destroy();
+    }
+    const img = this.add
+      .image(0, 0, 'fx_hand')
+      .setDepth(12)
+      .setAlpha(0.3 + Math.random() * 0.12)
+      .setAngle(Phaser.Math.Between(-35, 15) * (side === 'left' ? 1 : -1))
+      .setFlipX(side === 'right')
+      .setVisible(fighter.pose === 'idle');
+    fighter.prints.push({ img, dx: Phaser.Math.Between(-6, 6), dy: Phaser.Math.Between(-6, 6) });
+    this.placePrints(side);
+    this.publish();
+  }
+
+  private placePrints(side: Side) {
+    const fighter = this.f[side];
+    if (!this.layout) return;
+    const s = this.layout.fighterScale;
+    const dir = side === 'left' ? 1 : -1;
+    const cheek = CHEEK[fighter.id];
+    for (const p of fighter.prints) {
+      p.img
+        .setPosition(fighter.homeX + dir * (cheek.x + p.dx) * s, fighter.sprite.y - (cheek.y + p.dy) * s)
+        .setScale(s * 0.34);
+    }
+  }
+
+  private clearPrints(side: Side) {
+    for (const p of this.f[side].prints) p.img.destroy();
+    this.f[side].prints = [];
   }
 
   // ── K.O., fin de round, fin de match ───────────────────────────────────
@@ -606,8 +773,18 @@ export class FightScene extends Phaser.Scene {
     const winner = other(loser);
     this.setPhase('roundEnd');
     this.setPose(loser, 'dazed');
-    const d = bigAnnounce(this, 'K.O. !', CSS.yellow, 900, 150);
-    this.cameras.main.shake(260, 0.01);
+    this.fx.clearTransient();
+    this.fx.screenFlash(0.7);
+    this.slowmo(0.4, 700);
+    const d = announceImage(this, 'ann_ko', 900);
+    this.cameras.main.shake(300, 0.012);
+    sfx.ko();
+    this.crowd.whistle();
+    sfx.whistle(true);
+    this.say('ko');
+    this.crowd.cheer(1);
+    sfx.crowd(1, 1.8);
+    this.time.delayedCall(450, () => this.crowd.cheer(1));
     this.time.delayedCall(250, () => this.setPose(winner, 'victory'));
 
     if (!this.match) {
@@ -616,6 +793,7 @@ export class FightScene extends Phaser.Scene {
         for (const s of ['left', 'right'] as const) {
           this.f[s].hp = MATCH.hp;
           this.f[s].bar.setValue(1, true);
+          this.clearPrints(s);
           this.setPose(s, 'idle');
         }
         this.beginTurn('left');
@@ -627,10 +805,7 @@ export class FightScene extends Phaser.Scene {
     const matchOver = events.find((e): e is Extract<MatchEvent, { type: 'matchOver' }> => e.type === 'matchOver');
     this.time.delayedCall(d - 300, () => {
       if (roundOver) this.f[roundOver.winner].pips.setWon(roundOver.wins[roundOver.winner]);
-      if (!matchOver) {
-        const name = FIGHTERS[this.f[winner].id].short.toUpperCase();
-        flashText(this, this.scale.width / 2, this.scale.height * 0.62, `ROUND POUR ${name} !`, CSS.cream, 40);
-      }
+      if (!matchOver) announceImage(this, `ann_roundfor_${this.f[winner].id}`, 700, 0.62);
     });
     this.time.delayedCall(d + 900, () => {
       if (matchOver) this.showResult(matchOver.winner);
@@ -641,11 +816,14 @@ export class FightScene extends Phaser.Scene {
   private showResult(winner: Side) {
     const m = this.match!;
     this.setPhase('over');
+    this.commentator.hide();
     const { width, height } = this.scale;
     const loser = other(winner);
     this.setPose(winner, 'victory');
     this.setPose(loser, 'dazed');
     const w = FIGHTERS[this.f[winner].id];
+    this.crowd.cheer(1);
+    sfx.crowd(1, 2);
 
     const c = this.add.container(0, 0).setDepth(200);
     // Voile (150) < vainqueur en pleine lumière (160) < panneau (200).
@@ -672,10 +850,8 @@ export class FightScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setAngle(-4);
-    const wonRounds = m.wins[winner];
-    const lostRounds = m.wins[loser];
     const score = this.add
-      .text(width / 2, height * 0.5, `${wonRounds} ROUNDS À ${lostRounds}`, {
+      .text(width / 2, height * 0.5, `${m.wins[winner]} ROUNDS À ${m.wins[loser]}`, {
         fontFamily: FONT_UI,
         fontStyle: '800',
         fontSize: '24px',
@@ -720,5 +896,4 @@ export class FightScene extends Phaser.Scene {
     c.setName(`btn-${label}`);
     return c;
   }
-
 }

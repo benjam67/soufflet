@@ -23,10 +23,13 @@ export const FONT_UI = '"M PLUS 1p", "Arial", sans-serif';
 /** Attend les polices Google (avec un délai maximal) avant de créer des textes. */
 export async function loadFonts(timeoutMs = 2500): Promise<void> {
   if (!('fonts' in document)) return;
+  // Les polices japonaises sont découpées par plages : on charge celles des caractères utilisés.
+  const kana = 'バシッ！ーンペチ…ピシャ';
+  const names = 'ベルナールローラ';
   const load = Promise.all([
-    document.fonts.load(`40px "Dela Gothic One"`, 'Aバ'),
-    document.fonts.load(`800 20px "M PLUS 1p"`, 'Aベ'),
-    document.fonts.load(`500 20px "M PLUS 1p"`, 'Aベ'),
+    document.fonts.load(`40px "Dela Gothic One"`, `AÀÉÎ×${kana}`),
+    document.fonts.load(`800 20px "M PLUS 1p"`, `AÀÉÎ’${names}`),
+    document.fonts.load(`500 20px "M PLUS 1p"`, `A${names}`),
   ]).catch(() => undefined);
   await Promise.race([load, new Promise((r) => setTimeout(r, timeoutMs))]);
 }

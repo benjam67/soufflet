@@ -75,3 +75,23 @@
 ### Retours du jalon 2 — 2026-10-01
 - Écran de victoire : le texte « ENTRAÎNEMENT » débordait du bouton avec la vraie police (Dela Gothic One, plus large que la police de secours). Les libellés des boutons sont maintenant réduits automatiquement pour tenir dans le bouton (290 × 66).
 - Nouveau décor fourni (bar de village 4:3, 1024 × 768, ring en scotch octogonal) intégré à la place du décor provisoire. Ligne du sol calée sur le pied du comptoir (`STAGE.decorFloorY = 420`).
+
+## Phase 3 · Le spectacle — 2026-10-01 (jalon : test par le propriétaire)
+
+**Fait**
+- **Impact** (`src/fx/Fx.ts`) : éclair blanc et orange en étoile (3 variantes) avec étincelles, lignes de focus manga convergeant vers l'impact, onomatopée « バシッ！ » + « CLAAAC ! » (critique : « バシーン！ » + « CLAAAAAAC ! », gifle molle : « ペチ… » + « PLOC… », surchauffe : « ピシャ！ » + « PAF ! »), chiffre de dégâts, étiquettes CRITIQUE ×2 / EFFLEURÉE / RATÉE… / GIFLE MOLLE… / SURCHAUFFE !
+- **Temps** : arrêt sur image de 80 ms au contact (tout se fige, y compris les animations), puis ralenti ×0,35 pendant ~0,4 s sur les gros coups (≥ 20 dégâts ou critique) et ×0,4 au K.O. ; tremblement de caméra dosé selon la puissance ; flash blanc plein écran sur les critiques et le K.O.
+- **Réactions** : traces de main rouges qui s'accumulent sur la joue pendant le round (jusqu'à 6, effacées au round suivant), gouttes qui volent sur les gros coups, dents à partir de 25 dégâts, recul de la victime proportionnel à la puissance.
+- **Foule** (`src/fx/Crowd.ts`) : chaque habitué respire à son rythme, saute et se dandine avec son propre retard quand ça claque (2 sauts sur les gros coups), s'affaisse en secouant la tête sur une gifle molle ou ratée. Le patron siffle chaque début de round et le K.O. (petit saut + bulle « PRRRT ! »).
+- **Commentateur** : bandeau en bas d'écran, 30 phrases en 9 situations (début de match, critique, gros coup, normal, effleurée, ratée, gifle molle, surchauffe, K.O.), jamais deux fois de suite la même (`src/config/comments.ts`).
+- **Sons** (`src/audio/sfx.ts`), tous générés en code avec Web Audio (0 octet à télécharger) : claque (dosée selon la puissance, grave en plus sur les critiques), souffle du bras, cri de la victime (grave pour Bernard, aigu pour Lola), sifflet à trille, clameur et huées de la foule, cloche de K.O., bips des 2 dernières secondes du chrono, musique en boucle façon générique d'anime (132 BPM, La mineur). Le son démarre au premier contact (règle des navigateurs). Bouton son en haut à droite, choix mémorisé (`localStorage`).
+
+**Performance**
+- Tous les textes à gros contour (annonces, bandeaux, onomatopées, phrases du commentateur, chiffres de 0 à 9) et les effets sont tracés une seule fois au chargement (`src/fx/bake.ts`) : aucun texte n'est retracé ni renvoyé au GPU pendant le combat. Le pourcentage de la jauge utilise ces chiffres pré-rendus.
+- La jauge, le chrono et la traîne des barres de vie ne se redessinent que quand un pixel change.
+- Mesure (processeur ralenti ×4, mobile émulé) : travail du jeu (logique, animations, effets) médiane < 1 ms, p95 6–7 ms, p99 ~10 ms par image, soit moins de la moitié du budget de 16,7 ms d'une image à 60 fps.
+- Limite de la mesure : le bac à sable n'a pas de GPU, WebGL y est rastérisé en logiciel (≈ 8 images/s quoi qu'on affiche). Le temps de rendu mesuré ici n'est donc pas représentatif d'un téléphone ; le 60 fps réel est à confirmer sur ton téléphone.
+- Chargement : 30 fichiers, 1,92 Mo décodés, 1,06 Mo transférés (< 3 Mo).
+
+**Tests**
+- 8 nouveaux tests Playwright (19 au total), avec captures prises en figeant la boucle du jeu à l'instant exact de l'effet : impact (éclair, focus, onomatopée, son, foule, commentateur), critique (flash, ralenti, gouttes et dents), traces de main qui s'accumulent, sifflet du patron et foule qui bouge, K.O., bouton son mémorisé, poids du chargement, performance.

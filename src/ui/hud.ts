@@ -6,6 +6,7 @@ export class TimerDiamond extends Phaser.GameObjects.Container {
   private g: Phaser.GameObjects.Graphics;
   private label: Phaser.GameObjects.Text;
   private ratio = 1;
+  private lastKey = '';
   private readonly r = 38;
 
   constructor(scene: Phaser.Scene) {
@@ -27,7 +28,12 @@ export class TimerDiamond extends Phaser.GameObjects.Container {
 
   /** `seconds` restant (null = pas de chrono, losange vide), `ratio` 0–1 pour l'anneau. */
   set(seconds: number | null, ratio = 1) {
-    this.ratio = ratio;
+    // Redessiner seulement si quelque chose de visible change (la barre a 64 px).
+    const q = Math.round(ratio * 64);
+    const key = `${seconds === null ? '' : Math.ceil(seconds)}|${q}|${seconds !== null && seconds <= 1}`;
+    if (key === this.lastKey) return;
+    this.lastKey = key;
+    this.ratio = q / 64;
     const text = seconds === null ? '' : `${Math.ceil(seconds)}`;
     if (this.label.text !== text) {
       this.label.setText(text);
@@ -108,63 +114,4 @@ export class RoundPips extends Phaser.GameObjects.Container {
       g.strokePoints(pts, true);
     }
   }
-}
-
-/** Bandeau rouge incliné « À TOI, BERNARD ! » façon annonce d'anime. */
-export function turnBanner(scene: Phaser.Scene, text: string, fromSide: 'left' | 'right', holdMs = 650) {
-  const { width, height } = scene.scale;
-  const c = scene.add.container(width / 2, height * 0.42).setDepth(90).setAngle(-6);
-  const bandH = 86;
-  const band = scene.add.rectangle(0, 0, width * 1.4, bandH, COLORS.red).setStrokeStyle(6, COLORS.ink);
-  const stripe = scene.add.rectangle(0, bandH / 2 - 10, width * 1.4, 6, COLORS.yellow);
-  const label = scene.add
-    .text(0, -2, text, {
-      fontFamily: FONT_TITLE,
-      fontSize: '52px',
-      color: CSS.cream,
-      stroke: CSS.ink,
-      strokeThickness: 10,
-    })
-    .setOrigin(0.5);
-  c.add([band, stripe, label]);
-  const dir = fromSide === 'left' ? -1 : 1;
-  c.x = width / 2 + dir * width * 1.3;
-  scene.tweens.chain({
-    targets: c,
-    tweens: [
-      { x: width / 2, duration: 170, ease: 'Cubic.Out' },
-      { x: width / 2 - dir * 24, duration: holdMs, ease: 'Linear' },
-      { x: width / 2 - dir * width * 1.3, duration: 170, ease: 'Cubic.In' },
-    ],
-    onComplete: () => c.destroy(),
-  });
-  return 170 + holdMs + 170;
-}
-
-/** Grande annonce centrale (ROUND 1, BAGARRE !, K.O. !). Renvoie sa durée totale. */
-export function bigAnnounce(scene: Phaser.Scene, text: string, color: string, holdMs = 700, size = 110) {
-  const { width, height } = scene.scale;
-  const t = scene.add
-    .text(width / 2, height * 0.4, text, {
-      fontFamily: FONT_TITLE,
-      fontSize: `${size}px`,
-      color,
-      stroke: CSS.ink,
-      strokeThickness: 16,
-    })
-    .setOrigin(0.5)
-    .setAngle(-5)
-    .setDepth(95)
-    .setScale(2.6)
-    .setAlpha(0);
-  scene.tweens.chain({
-    targets: t,
-    tweens: [
-      { scale: 1, alpha: 1, duration: 200, ease: 'Back.Out' },
-      { scale: 1.06, duration: holdMs, ease: 'Linear' },
-      { alpha: 0, scale: 0.9, duration: 200, ease: 'Quad.In' },
-    ],
-    onComplete: () => t.destroy(),
-  });
-  return 200 + holdMs + 200;
 }

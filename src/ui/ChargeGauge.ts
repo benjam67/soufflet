@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { COLORS, CSS, FONT_TITLE } from './theme';
+import { digitsImage } from '../fx/bake';
 
 /**
  * Jauge de charge verticale (à gauche de l'écran) : zone dorée encadrée de blanc,
@@ -8,7 +9,9 @@ import { COLORS, CSS, FONT_TITLE } from './theme';
 export class ChargeGauge extends Phaser.GameObjects.Container {
   private g: Phaser.GameObjects.Graphics;
   private label: Phaser.GameObjects.Text;
-  private pct: Phaser.GameObjects.Text;
+  private pct: Phaser.GameObjects.Container;
+  private pctValue = -1;
+  private pctAt = 0;
   private value = 0;
   private zone: [number, number] = [80, 90];
   private overheat = false;
@@ -28,15 +31,7 @@ export class ChargeGauge extends Phaser.GameObjects.Container {
       })
       .setOrigin(0, 1)
       .setAngle(-6);
-    this.pct = scene.add
-      .text(0, 0, '0%', {
-        fontFamily: FONT_TITLE,
-        fontSize: '18px',
-        color: CSS.cream,
-        stroke: CSS.ink,
-        strokeThickness: 5,
-      })
-      .setOrigin(0.5, 0);
+    this.pct = scene.add.container(0, 0);
     this.add([this.g, this.label, this.pct]);
     scene.add.existing(this);
     this.setAlpha(0);
@@ -46,7 +41,7 @@ export class ChargeGauge extends Phaser.GameObjects.Container {
     this.h = height;
     this.setPosition(x, top);
     this.label.setPosition(-4, -10);
-    this.pct.setPosition(this.gaugeW / 2, height + 8);
+    this.pct.setPosition(this.gaugeW / 2, height + 26);
     this.redraw();
   }
 
@@ -56,6 +51,8 @@ export class ChargeGauge extends Phaser.GameObjects.Container {
   }
 
   setValue(charge: number, overheat = false) {
+    // Une jauge de ~370 px : au-delà de 0,25 % près, rien ne bouge à l'écran.
+    if (Math.abs(charge - this.value) < 0.25 && overheat === this.overheat && charge !== 0) return;
     this.value = charge;
     this.overheat = overheat;
     const golden = charge >= this.zone[0] && charge <= this.zone[1];
@@ -67,7 +64,15 @@ export class ChargeGauge extends Phaser.GameObjects.Container {
         this.scene.tweens.add({ targets: this.label, scale: { from: 1.35, to: 1 }, duration: 160, ease: 'Back.Out' });
       }
     }
-    this.pct.setText(`${Math.round(charge)}%`);
+    // Chiffres pré-rendus (aucun texte retracé), 10 fois par seconde au plus.
+    const v = Math.round(charge);
+    const now = performance.now();
+    if (v !== this.pctValue && (now - this.pctAt > 100 || v === 0 || v >= 100)) {
+      this.pctValue = v;
+      this.pctAt = now;
+      this.pct.removeAll(true);
+      this.pct.add(digitsImage(this.scene, v, 'n').setScale(0.4));
+    }
     this.redraw();
   }
 
