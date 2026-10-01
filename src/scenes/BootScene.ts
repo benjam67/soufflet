@@ -4,6 +4,7 @@ import { loadFonts } from '../ui/theme';
 import { bakeAll } from '../fx/bake';
 import type { FightData, Mode } from './FightScene';
 import type { AiLevel } from '../logic/ai';
+import { loadSession, normalizeCode } from '../net/protocol';
 
 export const POSES = ['idle', 'windup', 'swing', 'slap', 'hit', 'dazed', 'victory', 'selfslap'] as const;
 export type Pose = (typeof POSES)[number];
@@ -39,13 +40,35 @@ export class BootScene extends Phaser.Scene {
     await loadFonts();
     // Tous les textes à gros contour et les effets sont tracés une fois ici, jamais pendant le jeu.
     bakeAll(this);
-    this.scene.start('Fight', fightDataFromUrl(location.search));
+    const q = new URLSearchParams(location.search);
+    const data = fightDataFromUrl(location.search);
+    const bot = q.get('bot') === '1';
+    const join = normalizeCode(q.get('join') ?? '');
+    const saved = loadSession();
+    if (join && saved?.code === join) {
+      // Page rechargée après avoir rejoint ce salon : on reprend la partie.
+      this.scene.start('Title', { lobby: { resume: saved }, speed: data.speed, bot });
+    } else if (join) {
+      // Lien d'invitation : on rejoint directement le salon.
+      this.scene.start('Title', { lobby: { join }, speed: data.speed, bot });
+    } else if (q.get('mode') === 'online') {
+      this.scene.start('Title', { lobby: saved ? { resume: saved } : {}, speed: data.speed, bot });
+    } else if (q.has('mode') || q.has('autoplay')) {
+      // Accès direct à un mode par l'URL.
+      this.scene.start('Fight', data);
+    } else if (saved) {
+      // Page rechargée pendant une partie en ligne : on la reprend.
+      this.scene.start('Title', { lobby: { resume: saved }, speed: data.speed, bot });
+    } else {
+      this.scene.start('Title', { speed: data.speed });
+    }
   }
 }
 
 /**
  * Paramètres d'URL : `?mode=training`, `?mode=solo&level=easy|normal|hard` (contre l'IA), `?autoplay=1` (IA contre IA),
- * `?speed=4` (tout accélérer), `?seed=42` (IA reproductible). Par défaut : match à deux.
+ * `?mode=match` (2 joueurs), `?mode=online` (salon), `?join=CODE` (rejoindre un salon),
+ * `?speed=4` (tout accélérer), `?seed=42` (IA reproductible). Sans paramètre : écran d'accueil.
  */
 export function fightDataFromUrl(search: string): FightData {
   const q = new URLSearchParams(search);

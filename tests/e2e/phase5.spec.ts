@@ -43,7 +43,7 @@ async function slap(page: Page, finger: Finger, from: number, to: number, min = 
 test.describe('phase 5 · mécaniques avancées', () => {
   test('rage : la jauge monte avec les coups reçus, pleine → « RAGE MAX ! » et spéciale prête', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto('./?seed=3');
+    await page.goto('./?mode=match&seed=3');
     await waitTurn(page, 'left');
     await onScene(page, 'sc.match.rage.right = 95; sc.f.right.bar.setRage(0.95);');
     const finger = await Finger.on(page);
@@ -60,7 +60,7 @@ test.describe('phase 5 · mécaniques avancées', () => {
 
   test('Le Battoir : annonce, un coup énorme, la rage retombe à 0', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto('./?seed=3');
+    await page.goto('./?mode=match&seed=3');
     await waitTurn(page, 'left', 'banner');
     // (En jeu, la spéciale est prête avant le début du tour ; ici on la prépare pendant le bandeau.)
     await onScene(page, "sc.match.rage.left = 100; sc.match.specialReady.left = true; sc.f.left.bar.setRage(1); sc.showReady('left', true);");
@@ -87,7 +87,7 @@ test.describe('phase 5 · mécaniques avancées', () => {
   test('La Toupie : trois gifles enchaînées, trois chiffres, trois traces', async ({ page }) => {
     test.setTimeout(90_000);
     const errors = collectErrors(page);
-    await page.goto('./?seed=3');
+    await page.goto('./?mode=match&seed=3');
     // Bernard laisse filer son tour (gifle molle), puis Lola lance La Toupie.
     await waitTurn(page, 'right', 'banner');
     await onScene(page, 'sc.match.rage.right = 100; sc.match.specialReady.right = true; sc.f.right.bar.setRage(1);');
@@ -113,7 +113,7 @@ test.describe('phase 5 · mécaniques avancées', () => {
   test('sonné : étoiles au-dessus de la tête et jauge qui monte de façon irrégulière', async ({ page }) => {
     test.setTimeout(90_000);
     const errors = collectErrors(page);
-    await page.goto('./?seed=3');
+    await page.goto('./?mode=match&seed=3');
     await waitTurn(page, 'right', 'banner');
     await onScene(page, "sc.match.stunned.right = true; sc.afterHitStatus([{ type: 'stunned', side: 'right' }]);");
     await waitTurn(page, 'right');

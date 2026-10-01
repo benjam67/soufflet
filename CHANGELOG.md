@@ -142,3 +142,29 @@
 **Tests**
 - 15 tests unitaires de plus (86) : rage (gain, plafond, déblocage, conservation), spéciales (dégâts exacts, rage à 0, pas de gaspillage), sonné (seuil de 25, durée d'un tour, bornes et douceur de la courbe, surchauffe selon la courbe), équilibre 40–60 % sur 200 matchs avec ces mécaniques.
 - 4 tests Playwright de plus (26) : rage pleine → RAGE MAX et spéciale prête ; Le Battoir (annonce, dégâts, rage à 0) ; La Toupie (3 chiffres, 3 traces, total des dégâts) ; sonné (étoiles, vitesse de jauge mesurée image par image, état levé après le tour).
+
+## Phase 6 · Jeu en ligne — 2026-10-01 (jalon : test par le propriétaire)
+
+**Fait**
+- **Écran d'accueil** (`src/scenes/TitleScene.ts`, avancé de la phase 7 pour rendre le jalon testable sans lien spécial) : SOLO (puis FACILE / NORMAL / DIFFICILE), 2 JOUEURS, EN LIGNE, ENTRAÎNEMENT. Bouton maison en combat pour y revenir ; l'écran de fin propose REVANCHE et MENU.
+- **Salon** (`src/net/lobby.ts`, interface HTML pour profiter du clavier du téléphone) : CRÉER UN SALON → code à 4 lettres (sans I ni O, pour le dicter sans erreur) + bouton PARTAGER LE LIEN (partage natif du téléphone, sinon copie) ; REJOINDRE → saisie du code. Le lien `?join=CODE` rejoint directement. Messages clairs : « Le code fait 4 lettres. », « Salon introuvable. Vérifie le code. ».
+- **Connexion** (`src/net/session.ts`) : PeerJS / WebRTC, directe entre les deux téléphones, sans serveur de jeu à maintenir (seule la mise en relation passe par le serveur public de PeerJS). PeerJS est chargé seulement quand on va en ligne (le chargement initial ne grossit pas).
+- **Protocole** (`src/net/protocol.ts`, `online.ts`) : un match est entièrement déterminé par la suite des actions (charge, vitesse, angle). Chaque téléphone joue ses tours, envoie son action, et les deux déroulent le même `Match`. L'hôte joue Bernard à gauche, l'invité Lola à droite. C'est le téléphone de celui qui joue qui décide du dépassement de chrono. L'autre téléphone voit l'adversaire armer (pose + jauge), même si l'action arrive pendant son propre bandeau.
+- **Déconnexions et reprise** :
+  - battement de cœur toutes les 1,5 s ; sans nouvelles pendant 5 s, bandeau « CONNEXION PERDUE… », chrono en pause, et reconnexion automatique ;
+  - à chaque (re)connexion, les deux téléphones comparent leurs journaux d'actions et rejouent ce qui manque (`reconcile`) ;
+  - le journal est sauvegardé à chaque action (`sessionStorage`) : si la page est rechargée (invité ou hôte), la partie reprend exactement où elle en était (`replayMatch`, annonce « REPRISE ! »).
+- **Revanche** en ligne : un seul des deux appuie, les deux repartent.
+
+**Corrigé au passage (trouvé par les tests à deux navigateurs)**
+- Surchauffe et saccades : la surchauffe était vérifiée à chaque image, avant le traitement des mouvements du doigt en attente. Sur un appareil qui saccade, un swipe fait à temps pouvait devenir une surchauffe. Elle est maintenant constatée sur une image et appliquée à la suivante : les gestes déjà faits (datés à leur vrai moment) passent d'abord.
+
+**Tests**
+- 13 tests unitaires de plus (99) : code de salon, synchronisation des journaux (rattrapage, avance, revanche, divergence), reprise d'un match complet par son journal comparée étape par étape au match réel, surchauffe sous saccades.
+- 6 tests Playwright de plus (32), avec un serveur de mise en relation local et **deux navigateurs** :
+  - écran d'accueil et choix du niveau ; erreurs de salon ;
+  - match complet en ligne : même vainqueur, mêmes rounds, mêmes PV, même nombre de tours des deux côtés ; l'un voit « VICTOIRE ! », l'autre « DÉFAITE… » ; revanche ;
+  - chacun joue son tour au doigt : mêmes PV sur les deux téléphones à chaque tour, l'autre ne peut pas jouer à ta place ;
+  - coupure de connexion en plein match → bandeau, reconnexion, même résultat final ;
+  - page rechargée en plein match (invité, puis hôte) → reprise, même résultat final.
+- Limite : ces tests passent par un serveur de mise en relation local. Le serveur public de PeerJS et la traversée des box / réseaux mobiles ne peuvent pas être essayés depuis le bac à sable : c'est l'objet du test du propriétaire.

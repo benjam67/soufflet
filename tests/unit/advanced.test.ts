@@ -169,3 +169,25 @@ describe('équilibre avec les mécaniques avancées (200 matchs simulés)', () =
     expect(s.stunsPerMatch).toBeGreaterThan(1);
   });
 });
+
+describe('surchauffe et saccades', () => {
+  it('overheatedAt constate la surchauffe sans la déclencher', () => {
+    const g = new SlapGesture('lola', 1);
+    g.down(0, 100, 100);
+    expect(g.overheatedAt(1150)).toBe(false);
+    expect(g.overheatedAt(1151)).toBe(true);
+    expect(g.phase).toBe('charging');
+  });
+
+  it('un swipe fait à temps reste une gifle, même traité après une image en retard', () => {
+    // Le doigt glisse à 500 ms, mais l'appareil saccade : la surchauffe est constatée à 1400 ms
+    // avant que le mouvement soit traité. Le mouvement, daté à 500 ms, doit l'emporter.
+    const g = new SlapGesture('lola', 1);
+    g.down(0, 100, 100);
+    expect(g.overheatedAt(1400)).toBe(true); // image en retard : constat seulement
+    g.move(500, 200, 100);
+    const out = g.up(560, 400, 100);
+    expect(out?.type).toBe('slap');
+    if (out?.type === 'slap') expect(out.charge).toBeCloseTo(48.4, 0);
+  });
+});

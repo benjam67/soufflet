@@ -87,6 +87,7 @@ export function bakeAll(scene: Phaser.Scene) {
   bakeText(scene, 'ann_round_final', 'ROUND FINAL', title(110, CSS.yellow, 16));
   bakeText(scene, 'ann_fight', 'BAGARRE !', title(120, CSS.pink, 16));
   bakeText(scene, 'ann_ko', 'K.O. !', title(150, CSS.yellow, 18));
+  bakeText(scene, 'ann_resume', 'REPRISE !', title(100, CSS.cyan, 15));
   for (const id of Object.keys(FIGHTERS) as (keyof typeof FIGHTERS)[]) {
     const name = FIGHTERS[id].short.toUpperCase();
     bakeText(scene, `ban_turn_${id}`, `À TOI, ${name} !`, title(52, CSS.cream, 10));
@@ -254,6 +255,19 @@ export function bakeAll(scene: Phaser.Scene) {
   bakeGraphics(scene, 'fx_spark', 12, 12, (g) => {
     g.fillStyle(0xffffff, 1);
     g.fillCircle(6, 6, 6);
+  });
+
+  // Icône accueil
+  bakeGraphics(scene, 'ico_home', 56, 56, (g) => {
+    g.fillStyle(COLORS.ink, 0.85);
+    g.fillCircle(28, 28, 27);
+    g.lineStyle(3, COLORS.cream, 1);
+    g.strokeCircle(28, 28, 25);
+    g.fillStyle(COLORS.cream, 1);
+    g.fillTriangle(12, 28, 28, 13, 44, 28);
+    g.fillRect(17, 27, 22, 15);
+    g.fillStyle(COLORS.ink, 1);
+    g.fillRect(25, 32, 6, 10);
   });
 
   // Icônes son

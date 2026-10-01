@@ -159,3 +159,19 @@ export class Match {
     return FIGHTERS[this.ids[side]].short.toUpperCase();
   }
 }
+
+/**
+ * Reconstruit un match à partir de la suite des actions jouées (jeu en ligne : reprise après
+ * une coupure ou un rechargement). Les rounds s'enchaînent tout seuls.
+ */
+export function replayMatch(log: TurnAction[], left: FighterId = 'bernard', right: FighterId = 'lola', first: Side = 'left'): Match {
+  const m = new Match(left, right, first);
+  m.startRound();
+  for (const action of log) {
+    if (m.phase === 'roundOver') m.startRound();
+    if (m.phase !== 'turn') break;
+    m.play(action);
+  }
+  if (m.phase === 'roundOver') m.startRound();
+  return m;
+}

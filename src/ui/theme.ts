@@ -24,7 +24,7 @@ export const FONT_UI = '"M PLUS 1p", "Arial", sans-serif';
 export async function loadFonts(timeoutMs = 2500): Promise<void> {
   if (!('fonts' in document)) return;
   // Les polices japonaises sont découpées par plages : on charge celles des caractères utilisés.
-  const kana = 'バシッ！ーンペチ…ピシャ';
+  const kana = 'バシッ！ーンペチ…ピシャスラプファイタ';
   const names = 'ベルナールローラ';
   const load = Promise.all([
     document.fonts.load(`40px "Dela Gothic One"`, `AÀÉÎ×${kana}`),

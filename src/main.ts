@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
 import { FightScene } from './scenes/FightScene';
+import { TitleScene } from './scenes/TitleScene';
 
 declare global {
   interface Window {
@@ -30,7 +31,7 @@ const game = new Phaser.Game({
   input: { activePointers: 2 },
   render: { antialias: true, powerPreference: 'high-performance' },
   fps: { target: 60 },
-  scene: [BootScene, FightScene],
+  scene: [BootScene, TitleScene, FightScene],
 });
 
 window.__slap.game = game;

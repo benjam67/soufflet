@@ -26,12 +26,11 @@ export default defineConfig({
       },
     },
   ],
-  webServer: process.env.BASE_URL
-    ? undefined
-    : {
-        command: 'npm run build && npm run preview',
-        url: BASE_URL,
-        reuseExistingServer: false,
-        timeout: 180_000,
-      },
+  webServer: [
+    // Mise en relation locale pour les tests du jeu en ligne.
+    { command: 'node scripts/peer-server.mjs', url: 'http://127.0.0.1:9000/slap', reuseExistingServer: false, timeout: 30_000 },
+    ...(process.env.BASE_URL
+      ? []
+      : [{ command: 'npm run build && npm run preview', url: BASE_URL, reuseExistingServer: false, timeout: 180_000 }]),
+  ],
 });

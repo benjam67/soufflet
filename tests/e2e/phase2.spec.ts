@@ -33,7 +33,7 @@ async function slap(page: Page, finger: Finger, fromX: number, toX: number) {
 test.describe('phase 2 · le match', () => {
   test('match à deux : Bernard gifle, bandeau « À TOI, LOLA ! », Lola gifle en retour', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto('./');
+    await page.goto('./?mode=match');
     await page.waitForFunction(() => window.__slap?.ready === true);
     // Annonce du round 1
     await page.waitForFunction(() => (window.__slap?.state as { scenePhase?: string })?.scenePhase === 'intro');
@@ -73,7 +73,7 @@ test.describe('phase 2 · le match', () => {
 
   test('chrono de 3 s dépassé : gifle molle automatique de 5 dégâts', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto('./');
+    await page.goto('./?mode=match');
     await waitTurn(page, 'left');
     await page.waitForTimeout(1500);
     await page.screenshot({ path: `${SHOTS}/phase2-chrono.png` });

@@ -6,7 +6,10 @@ import type { CommentKind } from '../config/comments';
 import { computeLayout, computeStrike, HABITUES, type StageLayout } from '../logic/layout';
 import { SlapGesture, type GestureOutcome } from '../logic/gesture';
 import { chargeAt, computeSlap, stunCurve, type ChargeSpeed, type SlapResult } from '../logic/slap';
-import { Match, other, type MatchEvent, type Side, type TurnAction } from '../logic/match';
+import { Match, other, replayMatch, type MatchEvent, type Side, type TurnAction } from '../logic/match';
+import type { OnlineGame } from '../net/online';
+import { showNetLost } from '../net/lobby';
+import { makeButton } from '../ui/button';
 import { aiDecide, AI_PROFILES, LEVEL_LABEL, LEVEL_PROFILE, type AiLevel, type AiProfile } from '../logic/ai';
 import { createRng, type Rng } from '../logic/rng';
 import { sfx } from '../audio/sfx';
@@ -18,13 +21,18 @@ import { RoundPips, TimerDiamond } from '../ui/hud';
 import { COLORS, CSS, FONT_TITLE, FONT_UI } from '../ui/theme';
 import { fighterKey, type Pose } from './BootScene';
 
-export type Mode = 'match' | 'solo' | 'training' | 'autoplay';
-type Controller = 'human' | 'ai';
+export type Mode = 'match' | 'solo' | 'training' | 'autoplay' | 'online';
+/** Qui joue un côté : le doigt du joueur, l'IA, ou l'adversaire à distance (en ligne). */
+type Controller = 'human' | 'ai' | 'remote';
 
 export interface FightData {
   mode?: Mode;
   /** Niveau de l'IA en mode solo. */
   level?: AiLevel;
+  /** Partie en ligne (salon déjà connecté). */
+  online?: OnlineGame;
+  /** En ligne : le côté local est joué par l'IA (tests et démos). */
+  bot?: boolean;
   /** Accélère tout (animations, chrono, IA) : utile pour les tests et démos. */
   speed?: number;
   seed?: number;
@@ -92,6 +100,13 @@ export class FightScene extends Phaser.Scene {
   private aiTimers: Phaser.Time.TimerEvent[] = [];
   private frozen = false;
   private slowToken = 0;
+  private online: OnlineGame | null = null;
+  private bot = false;
+  /** En ligne : jauge de l'adversaire pendant qu'il arme. */
+  private remoteGauge: Phaser.Tweens.Tween | null = null;
+  private pendingPress = false;
+  private overheatSeen = false;
+  private homeBtn!: Phaser.GameObjects.Image;
 
   constructor() {
     super('Fight');
@@ -113,7 +128,19 @@ export class FightScene extends Phaser.Scene {
     };
     this.speed = data.speed && data.speed > 0 ? data.speed : 1;
     this.rng = createRng(data.seed ?? Math.floor(Math.random() * 1e9));
-    this.match = this.mode === 'training' ? null : new Match('bernard', 'lola');
+    this.online = data.online ?? null;
+    this.bot = !!data.bot;
+    this.remoteGauge = null;
+    this.pendingPress = false;
+    if (this.online) {
+      // En ligne : l'hôte joue Bernard à gauche, l'invité Lola à droite ; l'autre côté est à distance.
+      this.mode = 'online';
+      const me = this.online.localSide;
+      this.control = { left: 'remote', right: 'remote' };
+      this.control[me] = this.bot ? 'ai' : 'human';
+    }
+    // En ligne, le match est toujours reconstruit depuis le journal (vide au début, rempli à la reprise).
+    this.match = this.mode === 'training' ? null : this.online ? replayMatch(this.online.log) : new Match('bernard', 'lola');
     this.attacker = 'left';
     this.phase = 'intro';
     this.gesture = null;
@@ -159,7 +186,7 @@ export class FightScene extends Phaser.Scene {
       .setDepth(100)
       .setVisible(false);
     this.modeLabel = this.add
-      .text(0, 0, this.mode === 'training' ? 'ENTRAÎNEMENT' : this.mode === 'solo' ? `SOLO · ${LEVEL_LABEL[this.level]}` : 'DÉMO IA', {
+      .text(0, 0, this.modeText(), {
         fontFamily: FONT_TITLE,
         fontSize: '20px',
         color: CSS.cream,
@@ -183,12 +210,31 @@ export class FightScene extends Phaser.Scene {
       if (!sfx.muted) sfx.startMusic();
     });
 
+    this.homeBtn = this.add.image(0, 0, 'ico_home').setDepth(110).setInteractive({ useHandCursor: true });
+    this.homeBtn.on('pointerup', () => this.goHome());
+
     this.applyLayout();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.applyLayout, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.scale.off(Phaser.Scale.Events.RESIZE, this.applyLayout, this);
       this.slowToken++;
+      showNetLost(false);
+      if (this.online) {
+        const noop = () => {};
+        this.online.onPress = this.online.onCancel = this.online.onRestart = noop;
+        this.online.onStatus = noop;
+      }
     });
+
+    if (this.online) {
+      const o = this.online;
+      o.onPress = () => this.remotePress(true);
+      o.onCancel = () => this.remotePress(false);
+      o.onStatus = () => this.netStatus();
+      // Revanche lancée en face, ou état distant à adopter : on repart du journal.
+      o.onRestart = () => this.scene.restart({ online: o, bot: this.bot, speed: this.speed });
+      this.netStatus();
+    }
 
     // Le son ne peut démarrer qu'après un geste de l'utilisateur.
     this.input.on(Phaser.Input.Events.POINTER_DOWN, () => {
@@ -207,8 +253,113 @@ export class FightScene extends Phaser.Scene {
       window.__slap.scene = 'Fight';
     }
 
-    if (this.match) this.startRound();
+    if (this.online) {
+      if (this.online.log.length > 0) this.resume();
+      else this.startRound(true);
+    } else if (this.match) this.startRound();
     else this.beginTurn('left');
+  }
+
+  /** Retour à l'écran d'accueil (en ligne : on quitte le salon). */
+  private goHome() {
+    this.online?.leave();
+    this.scene.start('Title', { speed: this.speed });
+  }
+
+  // ── Jeu en ligne ───────────────────────────────────────────────────────
+
+  /** Connexion perdue ou rétablie : bandeau et chrono en pause. */
+  private netStatus() {
+    showNetLost(!!this.online && !this.online.connected && this.phase !== 'over');
+    this.publish();
+  }
+
+  /** L'adversaire a posé le doigt (ou l'a levé sans gifler) : on l'anime de notre côté. */
+  private remotePress(down: boolean) {
+    const side = this.attacker;
+    if (this.control[side] !== 'remote') return;
+    // Appui reçu pendant notre bandeau : on le montrera dès que le tour commence.
+    this.pendingPress = down && this.phase === 'banner';
+    if (down && this.phase === 'ready') {
+      const id = this.f[side].id;
+      this.setPhase('charging');
+      this.gauge.setZone(FIGHTERS[id].goldenZone);
+      this.gauge.setValue(0);
+      this.gauge.show(true);
+      this.setPose(side, 'windup');
+      const tw = { t: 0 };
+      this.remoteGauge = this.tweens.add({
+        targets: tw,
+        t: FIGHTERS[id].chargeTimeMs,
+        duration: FIGHTERS[id].chargeTimeMs,
+        onUpdate: () => this.gauge.setValue(chargeAt(tw.t, FIGHTERS[id].chargeTimeMs)),
+      });
+    } else if (!down && this.phase === 'charging') {
+      this.stopRemoteGauge();
+      this.gauge.show(false);
+      this.setPose(side, 'idle');
+      this.setPhase('ready');
+    }
+  }
+
+  /**
+   * Joue l'action reçue de l'adversaire. S'il n'a pas été vu en train d'armer (son action est
+   * arrivée pendant notre bandeau, par exemple), on montre d'abord un armement express.
+   */
+  private playRemote(action: TurnAction) {
+    const side = this.attacker;
+    const id = this.f[side].id;
+    const seenCharging = this.phase === 'charging';
+    this.stopRemoteGauge();
+    this.setPhase('busy');
+    this.f[side].sprite.x = this.f[side].homeX;
+    const finish = () => {
+      if (action.type === 'slap') this.gauge.setValue(action.charge);
+      else if (action.type === 'selfslap') this.gauge.setValue(100, true);
+      this.time.delayedCall(300, () => this.gauge.show(false));
+      this.act(action, true);
+    };
+    if (action.type === 'timeout') return this.act(action, true);
+    if (seenCharging) return finish();
+    const target = action.type === 'slap' ? action.charge : 100;
+    this.gauge.setZone(FIGHTERS[id].goldenZone);
+    this.gauge.setValue(0);
+    this.gauge.show(true);
+    this.setPose(side, 'windup');
+    const tw = { v: 0 };
+    this.tweens.add({ targets: tw, v: target, duration: 280, ease: 'Quad.Out', onUpdate: () => this.gauge.setValue(tw.v), onComplete: finish });
+  }
+
+  private stopRemoteGauge() {
+    this.remoteGauge?.remove();
+    this.remoteGauge = null;
+  }
+
+  /** Reprise d'une partie en ligne (page rechargée ou état resynchronisé) : on repart du journal. */
+  private resume() {
+    const m = this.match!;
+    for (const s of ['left', 'right'] as const) {
+      this.f[s].hp = m.hp[s];
+      this.f[s].bar.setValue(m.hp[s] / MATCH.hp, true);
+      this.f[s].bar.setRage(m.rage[s] / ADVANCED.rageMax);
+      this.f[s].pips.setWon(m.wins[s]);
+      this.setPose(s, 'idle');
+      if (m.stunned[s]) this.addDizzy(s);
+    }
+    if (m.phase === 'matchOver') {
+      this.showResult(m.winner!);
+      return;
+    }
+    this.setPhase('intro');
+    const d = announceImage(this, 'ann_resume', 500);
+    this.time.delayedCall(d - 150, () => this.beginTurn(m.turn));
+  }
+
+  private modeText() {
+    if (this.mode === 'training') return 'ENTRAÎNEMENT';
+    if (this.mode === 'solo') return `SOLO · ${LEVEL_LABEL[this.level]}`;
+    if (this.mode === 'online') return `EN LIGNE · TU ES ${FIGHTERS[this.online!.localSide === 'left' ? 'bernard' : 'lola'].short.toUpperCase()}`;
+    return 'DÉMO IA';
   }
 
   // ── Construction et placement ──────────────────────────────────────────
@@ -261,6 +412,7 @@ export class FightScene extends Phaser.Scene {
     this.hint.setPosition(width / 2, height - 58);
     this.modeLabel.setPosition(width / 2, this.mode === 'training' ? 14 : 96);
     this.soundBtn.setPosition(width - 44, 120);
+    this.homeBtn.setPosition(44, 120);
     this.fx.layout(width, height);
     this.commentator.layout(width, height);
 
@@ -282,7 +434,8 @@ export class FightScene extends Phaser.Scene {
       hp: { left: this.f.left.hp, right: this.f.right.hp },
       pose: { left: this.f.left.pose, right: this.f.right.pose },
       slaps: this.slapCount,
-      turns: this.turnsPlayed,
+      // Nombre de tours joués dans le match (survit à une reprise en ligne).
+      turns: m ? m.totalTurns : this.turnsPlayed,
       last: this.lastResult,
       charge: this.gesture ? this.gesture.charge(performance.now()) : 0,
       round: m?.round ?? 0,
@@ -355,11 +508,11 @@ export class FightScene extends Phaser.Scene {
 
   // ── Rounds et tours ────────────────────────────────────────────────────
 
-  private startRound() {
+  /** `prestarted` : le round est déjà lancé dans le match (en ligne, il est reconstruit du journal). */
+  private startRound(prestarted = false) {
     const m = this.match!;
-    const events = m.startRound();
-    const start = events.find((e): e is Extract<MatchEvent, { type: 'roundStart' }> => e.type === 'roundStart');
-    if (!start) return;
+    if (!prestarted && m.startRound().length === 0) return;
+    const start = { round: m.round, first: m.turn };
     this.setPhase('intro');
     for (const s of ['left', 'right'] as const) {
       this.f[s].hp = m.hp[s];
@@ -406,6 +559,8 @@ export class FightScene extends Phaser.Scene {
       this.setPhase('ready');
       this.showHint();
       if (this.control[side] === 'ai') this.aiTurn(side);
+      if (this.control[side] === 'remote' && this.pendingPress) this.remotePress(true);
+      this.pendingPress = false;
     });
   }
 
@@ -420,7 +575,17 @@ export class FightScene extends Phaser.Scene {
 
   update(time: number, delta: number) {
     if (!this.frozen) this.crowd.update(time);
-    if (this.match && (this.phase === 'ready' || this.phase === 'charging')) {
+    if (this.online && this.match && this.control[this.attacker] === 'remote' && (this.phase === 'ready' || this.phase === 'charging')) {
+      // L'adversaire a joué : son action est arrivée par le réseau.
+      const action = this.online.takeRemote(this.match.totalTurns);
+      if (action) {
+        this.playRemote(action);
+        return;
+      }
+    }
+    // En ligne, le chrono s'arrête pendant une coupure de connexion.
+    const netPaused = !!this.online && !this.online.connected;
+    if (this.match && !netPaused && (this.phase === 'ready' || this.phase === 'charging')) {
       this.turnElapsed += delta * this.speed;
       const left = MATCH.turnTimeMs - this.turnElapsed;
       this.timer.set(Math.max(0, left) / 1000, Math.max(0, left) / MATCH.turnTimeMs);
@@ -428,15 +593,24 @@ export class FightScene extends Phaser.Scene {
       if (sec !== this.lastTickSecond && sec <= 2 && sec > 0) sfx.tick(sec <= 1);
       this.lastTickSecond = sec;
       // Chrono écoulé : gifle molle automatique (sauf swipe déjà lancé, qu'on laisse finir).
-      if (left <= 0 && this.gesture?.phase !== 'swiping') {
+      // (En ligne, c'est le téléphone de celui qui joue qui décide du dépassement.)
+      if (left <= 0 && this.gesture?.phase !== 'swiping' && this.control[this.attacker] !== 'remote') {
         this.timeout();
         return;
       }
     }
     if (this.phase === 'charging' && this.gesture) {
       const t = performance.now();
-      const out = this.gesture.update(t);
-      if (out) return this.resolve(out);
+      // Surchauffe : constatée sur une image, appliquée à la suivante seulement. Si le téléphone
+      // saccade, les mouvements du doigt déjà faits (datés à leur vrai moment) passent d'abord :
+      // un swipe fait à temps n'est jamais transformé en surchauffe par une image en retard.
+      if (this.gesture.overheatedAt(t)) {
+        if (this.overheatSeen) {
+          this.overheatSeen = false;
+          return this.resolve(this.gesture.update(t));
+        }
+        this.overheatSeen = true;
+      } else this.overheatSeen = false;
       const c = this.gesture.charge(t);
       this.gauge.setValue(c, false);
       if (window.__slap?.state) window.__slap.state.charge = c;
@@ -469,9 +643,11 @@ export class FightScene extends Phaser.Scene {
 
   private onDown(p: Phaser.Input.Pointer) {
     if (this.phase !== 'ready' || this.control[this.attacker] !== 'human') return;
-    if (this.soundBtn.getBounds().contains(p.x, p.y)) return;
+    if (this.soundBtn.getBounds().contains(p.x, p.y) || this.homeBtn.getBounds().contains(p.x, p.y)) return;
+    this.online?.sendPress();
     const att = this.f[this.attacker];
     this.gesture = new SlapGesture(att.id, this.attacker === 'left' ? 1 : -1, this.chargeSpeed(this.attacker));
+    this.overheatSeen = false;
     const { x, y } = this.css(p);
     this.gesture.down(this.now(p), x, y);
     this.pointerId = p.id;
@@ -500,6 +676,7 @@ export class FightScene extends Phaser.Scene {
     const att = this.f[this.attacker];
     att.sprite.x = att.homeX;
     if (out.type === 'cancel') {
+      this.online?.sendCancel();
       this.gesture = null;
       this.gauge.show(false);
       this.setPose(this.attacker, 'idle');
@@ -565,7 +742,9 @@ export class FightScene extends Phaser.Scene {
 
   // ── Résolution d'un tour ───────────────────────────────────────────────
 
-  private act(action: TurnAction) {
+  private act(action: TurnAction, fromRemote = false) {
+    // En ligne : notre action part chez l'adversaire (et dans le journal).
+    if (this.online && this.match && !fromRemote) this.online.sendAction(this.match.totalTurns, action);
     this.cancelAi();
     this.setPhase('busy');
     this.hint.setVisible(false);
@@ -1067,7 +1246,8 @@ export class FightScene extends Phaser.Scene {
     this.tweens.add({ targets: shade, alpha: 1, duration: 300 });
     const band = this.add.rectangle(width / 2, height * 0.24, width * 1.3, 128, COLORS.red).setStrokeStyle(8, COLORS.ink).setAngle(-4);
     // Solo : on parle du point de vue du joueur (victoire ou défaite contre l'IA).
-    const playerLost = this.mode === 'solo' && this.control[winner] === 'ai';
+    const playerLost = (this.mode === 'solo' && this.control[winner] === 'ai') || (this.mode === 'online' && this.control[winner] === 'remote');
+    showNetLost(false);
     const title = this.add
       .text(width / 2, height * 0.23, playerLost ? 'DÉFAITE…' : 'VICTOIRE !', {
         fontFamily: FONT_TITLE,
@@ -1101,14 +1281,20 @@ export class FightScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setAngle(-4);
     c.add([band, title, who, score]);
-    const again = () => this.scene.restart({ mode: this.mode, level: this.level, speed: this.speed });
-    c.add(this.button(width / 2 - 160, height * 0.88, 'REVANCHE', COLORS.yellow, again));
-    // Solo gagné : on propose le niveau au-dessus.
+    const again = () => {
+      if (this.online) {
+        // Revanche en ligne : les deux téléphones repartent ensemble.
+        this.online.rematch();
+        this.scene.restart({ online: this.online, bot: this.bot, speed: this.speed });
+      } else this.scene.restart({ mode: this.mode, level: this.level, speed: this.speed });
+    };
+    c.add(makeButton(this, width / 2 - 160, height * 0.88, 'REVANCHE', COLORS.yellow, again));
+    // Solo gagné : on propose le niveau au-dessus. Sinon, retour au menu.
     const nextLevel: AiLevel | null = this.mode === 'solo' && !playerLost ? (this.level === 'easy' ? 'normal' : this.level === 'normal' ? 'hard' : null) : null;
     if (nextLevel) {
-      c.add(this.button(width / 2 + 160, height * 0.88, 'NIVEAU SUIVANT', COLORS.pink, () => this.scene.restart({ mode: 'solo', level: nextLevel, speed: this.speed })));
+      c.add(makeButton(this, width / 2 + 160, height * 0.88, 'NIVEAU SUIVANT', COLORS.pink, () => this.scene.restart({ mode: 'solo', level: nextLevel, speed: this.speed })));
     } else {
-      c.add(this.button(width / 2 + 160, height * 0.88, 'ENTRAÎNEMENT', COLORS.cyan, () => this.scene.restart({ mode: 'training' })));
+      c.add(makeButton(this, width / 2 + 160, height * 0.88, 'MENU', COLORS.cyan, () => this.goHome()));
     }
     this.f[winner].sprite.setDepth(160);
     this.timer.set(null);
@@ -1117,29 +1303,5 @@ export class FightScene extends Phaser.Scene {
     title.setScale(2);
     this.tweens.add({ targets: title, scale: 1, duration: 300, ease: 'Back.Out' });
     this.publish();
-  }
-
-  private button(x: number, y: number, label: string, color: number, onClick: () => void) {
-    const W = 290;
-    const H = 66;
-    const c = this.add.container(x, y);
-    const bg = this.add.rectangle(0, 0, W, H, color).setStrokeStyle(6, COLORS.ink).setAngle(-3);
-    const t = this.add
-      .text(0, 0, label, { fontFamily: FONT_TITLE, fontSize: '28px', color: CSS.ink })
-      .setOrigin(0.5)
-      .setAngle(-3);
-    // Le texte ne déborde jamais du bouton : réduit si la police est plus large que prévu.
-    const maxW = W - 40;
-    if (t.width > maxW) t.setScale(maxW / t.width);
-    c.add([bg, t]);
-    c.setSize(W, H).setInteractive({ useHandCursor: true });
-    c.on('pointerdown', () => c.setScale(0.94));
-    c.on('pointerout', () => c.setScale(1));
-    c.on('pointerup', () => {
-      c.setScale(1);
-      onClick();
-    });
-    c.setName(`btn-${label}`);
-    return c;
   }
 }

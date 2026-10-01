@@ -83,6 +83,12 @@ export class SlapGesture {
     return null;
   }
 
+  /** La jauge est-elle en surchauffe à l'instant `t` ? (sans rien déclencher) */
+  overheatedAt(t: number): boolean {
+    if (this.phase !== 'charging' || !this.press) return false;
+    return t - this.press.t > this.fullAt && isOverheated(t - this.press.t, this.chargeTimeMs, this.speed);
+  }
+
   /** À appeler à chaque image : déclenche la surchauffe pendant l'armement. */
   update(t: number): GestureOutcome | null {
     if (this.phase !== 'charging' || !this.press) return null;

@@ -25,7 +25,7 @@ async function waitReady(page: Page) {
 
 test('la scène de combat s’affiche sans erreur en paysage', async ({ page }) => {
   const errors = collectErrors(page);
-  await page.goto('./');
+  await page.goto('./?mode=match');
   await waitReady(page);
 
   const info = await page.evaluate(() => {
@@ -61,7 +61,7 @@ test('la scène de combat s’affiche sans erreur en paysage', async ({ page }) 
 test('écran « tourne ton téléphone » en portrait', async ({ page }) => {
   const errors = collectErrors(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('./');
+  await page.goto('./?mode=match');
   await expect(page.locator('#rotate')).toBeVisible();
   await expect(page.locator('#rotate')).toContainText('Tourne ton téléphone');
   await page.screenshot({ path: `${SHOTS}/phase0-portrait.png` });
@@ -71,7 +71,7 @@ test('écran « tourne ton téléphone » en portrait', async ({ page }) => {
 });
 
 test('manifest PWA valide', async ({ page, request }) => {
-  await page.goto('./');
+  await page.goto('./?mode=match');
   const href = await page.locator('link[rel="manifest"]').getAttribute('href');
   const res = await request.get(new URL(href!, page.url()).toString());
   expect(res.ok()).toBe(true);

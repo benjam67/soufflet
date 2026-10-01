@@ -77,6 +77,145 @@
         margin: 0;
         font-size: 18px;
       }
+      /* ── Salon du jeu en ligne ── */
+      #lobby {
+        position: fixed;
+        inset: 0;
+        z-index: 8;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(26, 16, 32, 0.82);
+        font-family: 'M PLUS 1p', system-ui, sans-serif;
+        color: var(--cream);
+        touch-action: manipulation;
+      }
+      #lobby[hidden] {
+        display: none;
+      }
+      #lobby .panel {
+        position: relative;
+        width: min(92vw, 520px);
+        max-height: 94vh;
+        box-sizing: border-box;
+        padding: 14px 18px 16px;
+        background: var(--ink);
+        border: 5px solid var(--cream);
+        box-shadow: 8px 8px 0 var(--red);
+        transform: rotate(-1.2deg);
+        text-align: center;
+      }
+      #lobby .ttl {
+        font-family: 'Dela Gothic One', system-ui, sans-serif;
+        font-size: 26px;
+        color: var(--yellow);
+        text-shadow: 3px 3px 0 var(--red);
+        margin-bottom: 8px;
+      }
+      #lobby [data-view] {
+        display: none;
+      }
+      #lobby[data-show='choice'] [data-view='choice'],
+      #lobby[data-show='host'] [data-view='host'],
+      #lobby[data-show='join'] [data-view='join'],
+      #lobby[data-show='busy'] [data-view='busy'] {
+        display: block;
+      }
+      #lobby p {
+        margin: 6px 0;
+        font-weight: 800;
+        font-size: 15px;
+      }
+      #lobby .row {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      #lobby button {
+        font-family: 'Dela Gothic One', system-ui, sans-serif;
+        font-size: 18px;
+        color: var(--ink);
+        background: var(--yellow);
+        border: 5px solid var(--ink);
+        outline: 3px solid var(--cream);
+        padding: 9px 16px;
+        margin: 6px 0;
+        transform: rotate(-2deg);
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      #lobby button:active {
+        transform: rotate(-2deg) scale(0.95);
+      }
+      #lobby button.alt {
+        background: var(--cyan);
+      }
+      #lobby button.back {
+        font-size: 13px;
+        background: var(--cream);
+        padding: 5px 10px;
+        outline: none;
+        border-width: 3px;
+      }
+      #lobby .code {
+        font-family: 'Dela Gothic One', system-ui, sans-serif;
+        font-size: 56px;
+        line-height: 1.1;
+        letter-spacing: 10px;
+        color: var(--cream);
+        text-shadow: 4px 4px 0 var(--pink);
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      #lobby input {
+        font-family: 'Dela Gothic One', system-ui, sans-serif;
+        font-size: 40px;
+        width: 5.2em;
+        text-align: center;
+        letter-spacing: 8px;
+        text-transform: uppercase;
+        color: var(--ink);
+        background: var(--cream);
+        border: 5px solid var(--yellow);
+        padding: 2px 0 2px 8px;
+        -webkit-user-select: text;
+        user-select: text;
+        touch-action: manipulation;
+      }
+      #lobby .status {
+        min-height: 20px;
+        color: var(--cyan);
+      }
+      #lobby .status.err {
+        color: var(--pink);
+      }
+      /* ── Bandeau « connexion perdue » ── */
+      #netlost {
+        position: fixed;
+        left: 50%;
+        top: 30%;
+        transform: translate(-50%, -50%) rotate(-3deg);
+        z-index: 7;
+        background: var(--ink);
+        color: var(--cream);
+        border: 5px solid var(--pink);
+        padding: 10px 22px;
+        font-family: 'Dela Gothic One', system-ui, sans-serif;
+        font-size: 20px;
+        text-align: center;
+        pointer-events: none;
+      }
+      #netlost[hidden] {
+        display: none;
+      }
+      #netlost small {
+        display: block;
+        font-family: 'M PLUS 1p', system-ui, sans-serif;
+        font-weight: 800;
+        font-size: 13px;
+        color: var(--cyan);
+      }
       @keyframes tilt {
         0%, 20% { transform: rotate(0deg); }
         55%, 80% { transform: rotate(-90deg); }
@@ -91,6 +230,35 @@
   </head>
   <body>
     <div id="game"></div>
+    <div id="lobby" hidden data-show="choice">
+      <div class="panel">
+        <div class="ttl">EN LIGNE</div>
+        <div data-view="choice">
+          <p>Chacun sur son téléphone, avec un code de salon.</p>
+          <div class="row">
+            <button data-act="create">CRÉER UN SALON</button>
+            <button data-act="join" class="alt">REJOINDRE</button>
+          </div>
+        </div>
+        <div data-view="host">
+          <p>Donne ce code à ton adversaire :</p>
+          <div class="code" id="lobby-code-show">····</div>
+          <div class="row"><button data-act="share" class="alt">PARTAGER LE LIEN</button></div>
+          <p class="status" data-status>En attente de ton adversaire…</p>
+        </div>
+        <div data-view="join">
+          <p>Code du salon :</p>
+          <input id="lobby-code" maxlength="4" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="go" aria-label="Code du salon" />
+          <div class="row"><button data-act="go">C’EST PARTI</button></div>
+          <p class="status" data-status></p>
+        </div>
+        <div data-view="busy">
+          <p class="status" data-status>Connexion…</p>
+        </div>
+        <button data-act="back" class="back">← RETOUR</button>
+      </div>
+    </div>
+    <div id="netlost" hidden role="status">CONNEXION PERDUE…<small>On attend ton adversaire, la partie reprendra toute seule.</small></div>
     <div id="rotate" role="alert">
       <div class="title">SLAP FIGHTER</div>
       <div class="phone" aria-hidden="true"></div>
