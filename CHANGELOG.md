@@ -201,3 +201,18 @@ Mesuré par simulation : celui qui ouvre gagnait **61,8 %** des manches.
 - 127 tests unitaires (esquive, garde de rage, geste d'esquive, feinte, spéciales volontaires, droit de réponse, double K.O., rejeu du journal, avantage de l'ouvreur ≈ 50 %).
 - Playwright : nouveau fichier `esquive.spec.ts` (8 tests) ; spéciales et jeu en ligne mis à jour (les esquives passent bien par le réseau, journaux identiques des deux côtés).
 - Les gestes à timing serré sont joués dans la page au rythme de l'horloge du jeu : le bac à sable de test est trop lent et irrégulier pour les jouer « en vrai ».
+
+## Phase 7 · Progression et menus — 2026-10-02
+
+**Fait**
+- **Choix du perso** (écran SOLO, bouton « PERSO : … ») : le joueur est à gauche, l'adversaire est l'autre perso. Vaut pour le solo, le 2 joueurs et l'entraînement ; en ligne, l'hôte reste Bernard. Accès direct : `?fighter=bernard|lola`.
+- **XP en fin de match** (`src/config/progress.ts`) : 15 pour un match terminé, +10 par round gagné, + victoire contre l'IA (facile 30, normal 55, difficile 90) ou en ligne (60) ; 20 pour un match à deux sur le même téléphone. Rien pour la démo ni l'entraînement.
+- **Niveaux** : 100, 250, 450, 700… XP (chaque niveau demande 50 XP de plus que le précédent), 10 niveaux.
+- **Déblocages** : niveau 2 tenue Streetwear de Bernard, 3 Bar de nuit, 4 tenue Néon de Lola, 5 Bar au couchant, 6 tenue Bronze de Bernard, 7 tenue Ombre de Lola. **Provisoire** : faute de dessins, une tenue ou un bar est une teinte appliquée au perso ou au décor (`tint` dans `UNLOCKS`) ; il suffira d'y brancher les vraies images.
+- **Vestiaire** (écran d'accueil) : choix de la tenue de chaque perso et du bar, annonce du prochain déblocage.
+- Écran d'accueil : niveau et barre d'XP sous le titre. Écran de résultat : XP gagnée, barre de niveau, bandeau « DÉBLOQUÉ : … ».
+- **Sauvegarde** dans `localStorage` (`slap.progress`) : XP, matchs, victoires, perso, tenues, bar. Une sauvegarde absente, abîmée ou incohérente (tenue pas encore débloquée) est remise d'aplomb sans planter.
+
+**Tests**
+- 137 tests unitaires (dont 10 sur la progression : paliers, XP, déblocages, choix, sauvegarde).
+- Playwright `phase7.spec.ts` : titre → vestiaire → choix du perso → match gagné → résultat et XP → revanche → déblocage → rechargement (tout est conservé) → tenue enfilée, conservée après rechargement et visible en combat ; une défaite rapporte aussi de l'XP.

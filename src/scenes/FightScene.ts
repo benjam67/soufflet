@@ -21,6 +21,7 @@ import { HealthBar } from '../ui/HealthBar';
 import { RoundPips, TimerDiamond } from '../ui/hud';
 import { COLORS, CSS, FONT_TITLE, FONT_UI } from '../ui/theme';
 import { fighterKey, type Pose } from './BootScene';
+import { award, loadProgress, saveProgress, tintOf, levelProgress, type Award, type Progress } from '../logic/progress';
 
 export type Mode = 'match' | 'solo' | 'training' | 'autoplay' | 'online';
 /** Qui joue un côté : le doigt du joueur, l'IA, ou l'adversaire à distance (en ligne). */
@@ -30,6 +31,8 @@ export interface FightData {
   mode?: Mode;
   /** Niveau de l'IA en mode solo. */
   level?: AiLevel;
+  /** Perso du joueur (à gauche) en solo, à deux et à l'entraînement ; l'adversaire est l'autre. */
+  fighter?: FighterId;
   /** Partie en ligne (salon déjà connecté). */
   online?: OnlineGame;
   /** En ligne : le côté local est joué par l'IA (tests et démos). */
@@ -95,6 +98,11 @@ export class FightScene extends Phaser.Scene {
   layout!: StageLayout;
 
   private mode: Mode = 'match';
+  private ids: Record<Side, FighterId> = { left: 'bernard', right: 'lola' };
+  private progress: Progress = loadProgress();
+  /** Teinte de la tenue de chaque perso (blanc = dessin d'origine). */
+  private skin: Record<Side, number> = { left: 0xffffff, right: 0xffffff };
+  private lastAward: Award | null = null;
   private level: AiLevel = 'normal';
   /** Qui joue chaque côté : le joueur (doigt) ou l'IA. */
   private control: Record<Side, Controller> = { left: 'human', right: 'human' };
@@ -189,8 +197,14 @@ export class FightScene extends Phaser.Scene {
       this.control = { left: 'remote', right: 'remote' };
       this.control[me] = this.bot ? 'ai' : 'human';
     }
+    // En ligne, l'hôte est toujours Bernard ; ailleurs le joueur choisit son perso (à gauche).
+    const mine: FighterId = this.online ? 'bernard' : (data.fighter ?? 'bernard');
+    this.ids = { left: mine, right: mine === 'bernard' ? 'lola' : 'bernard' };
+    this.progress = loadProgress();
+    this.skin = { left: tintOf(this.progress.skin[this.ids.left]), right: tintOf(this.progress.skin[this.ids.right]) };
+    this.lastAward = null;
     // En ligne, le match est toujours reconstruit depuis le journal (vide au début, rempli à la reprise).
-    this.match = this.mode === 'training' ? null : this.online ? replayMatch(this.online.log) : new Match('bernard', 'lola');
+    this.match = this.mode === 'training' ? null : this.online ? replayMatch(this.online.log) : new Match(this.ids.left, this.ids.right);
     this.attacker = 'left';
     this.phase = 'intro';
     this.gesture = null;
@@ -218,15 +232,15 @@ export class FightScene extends Phaser.Scene {
   create() {
     this.setTimeScale(1);
 
-    this.decor = this.add.image(0, 0, 'decor').setOrigin(0, 0);
+    this.decor = this.add.image(0, 0, 'decor').setOrigin(0, 0).setTint(tintOf(this.progress.bar));
     this.crowdImgs = HABITUES.map((id) =>
       this.add.image(0, 0, `habitue_${id}`).setOrigin(0.5, 1).setTint(STAGE.crowdTint),
     );
     this.patron = this.add.image(0, 0, 'patron').setOrigin(0.5, 1).setTint(STAGE.patronTint);
 
     this.f = {
-      left: this.makeFighter('left', 'bernard'),
-      right: this.makeFighter('right', 'lola'),
+      left: this.makeFighter('left', this.ids.left),
+      right: this.makeFighter('right', this.ids.right),
     };
 
     this.fx = new Fx(this);
@@ -455,7 +469,7 @@ export class FightScene extends Phaser.Scene {
       if (m.stunned[s]) this.addDizzy(s);
     }
     if (m.phase === 'matchOver') {
-      this.showResult(m.winner!);
+      this.showResult(m.winner!, false);
       return;
     }
     this.setPhase('intro');
@@ -481,6 +495,7 @@ export class FightScene extends Phaser.Scene {
       .image(0, 0, fighterKey(id, 'idle'))
       .setFlipX(flip)
       .setOrigin(flip ? 1 - a.originX : a.originX, a.originY)
+      .setTint(this.skin[side])
       .setDepth(10);
     const bar = new HealthBar(this, side, FIGHTERS[id].name, FIGHTERS[id].katakana).setDepth(100);
     const pips = new RoundPips(this, side, MATCH.roundsToWin).setDepth(100).setVisible(this.mode !== 'training');
@@ -534,6 +549,9 @@ export class FightScene extends Phaser.Scene {
     const m = this.match;
     window.__slap.state = {
       mode: this.mode,
+      ids: { ...this.ids },
+      award: this.lastAward,
+      progress: { xp: this.progress.xp, matches: this.progress.matches, wins: this.progress.wins },
       level: this.mode === 'solo' ? this.level : null,
       control: { ...this.control },
       phase: this.phase === 'ready' || this.phase === 'charging' ? this.phase : this.phase === 'over' ? 'over' : 'busy',
@@ -1019,7 +1037,7 @@ export class FightScene extends Phaser.Scene {
     const f = this.f[side];
     this.tintLock[side] = color !== null;
     if (color !== null) f.sprite.setTint(color);
-    else if (!f.readyTag) f.sprite.clearTint();
+    else if (!f.readyTag) f.sprite.setTint(this.skin[side]);
   }
 
   /** Recul d'esquive (en attendant une vraie pose) : le perso part en arrière puis revient. */
@@ -1259,7 +1277,7 @@ export class FightScene extends Phaser.Scene {
         f.readyTag.destroy();
         f.readyTag = null;
         this.tweens.killTweensOf(f.sprite);
-        if (!this.tintLock[side]) f.sprite.clearTint();
+        if (!this.tintLock[side]) f.sprite.setTint(this.skin[side]);
       }
       return;
     }
@@ -1278,7 +1296,7 @@ export class FightScene extends Phaser.Scene {
         const k = glow.v;
         // Teinte rosée qui pulse (blanc → rose), sans masquer le dessin.
         const c = Phaser.Display.Color.Interpolate.ColorWithColor(
-          Phaser.Display.Color.ValueToColor(0xffffff),
+          Phaser.Display.Color.ValueToColor(this.skin[side]),
           Phaser.Display.Color.ValueToColor(0xff9cc8),
           100,
           k * 100,
@@ -1738,7 +1756,8 @@ export class FightScene extends Phaser.Scene {
     });
   }
 
-  private showResult(winner: Side) {
+  /** `fresh` : le match vient de se finir (on compte l'XP) ; faux quand on réaffiche un résultat à la reprise. */
+  private showResult(winner: Side, fresh = true) {
     const m = this.match!;
     this.setPhase('over');
     this.commentator.hide();
@@ -1791,18 +1810,46 @@ export class FightScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setAngle(-4);
     c.add([band, title, who, score]);
+    // Progression : XP gagnée, niveau, déblocages (sauvegardés tout de suite).
+    const kind = this.mode === 'solo' || this.mode === 'match' || this.mode === 'online' ? this.mode : null;
+    if (fresh && kind && !this.bot) {
+      const me: Side = this.mode === 'online' ? this.online!.localSide : this.mode === 'solo' ? 'left' : winner;
+      const a = award(this.progress, { kind, level: this.level, won: !playerLost, rounds: m.wins[me] });
+      saveProgress(this.progress);
+      this.lastAward = a;
+      const y = height * 0.61;
+      const barW = 300;
+      const label = this.add
+        .text(width / 2, y, `+${a.gained} XP  ·  NIVEAU ${a.levelAfter}`, { fontFamily: FONT_TITLE, fontSize: '26px', color: CSS.yellow, stroke: CSS.ink, strokeThickness: 7 })
+        .setOrigin(0.5);
+      const track = this.add.rectangle(width / 2, y + 30, barW, 14, COLORS.ink).setStrokeStyle(3, COLORS.cream);
+      const from = a.levelAfter > a.levelBefore ? 0 : levelProgress(a.before);
+      const fill = this.add.rectangle(width / 2 - barW / 2 + 3, y + 30, Math.max(1, (barW - 6) * from), 8, COLORS.yellow).setOrigin(0, 0.5);
+      this.tweens.add({ targets: fill, width: Math.max(1, (barW - 6) * levelProgress(a.after)), delay: 350, duration: 600, ease: 'Quad.Out' });
+      c.add([label, track, fill]);
+      if (a.unlocked.length > 0) {
+        const names = a.unlocked.map((u) => (u.kind === 'bar' ? u.name : `tenue ${u.name} de ${FIGHTERS[u.fighter!].short}`)).join(' · ');
+        const un = this.add
+          .text(width / 2, y + 66, `DÉBLOQUÉ : ${names} !`, { fontFamily: FONT_TITLE, fontSize: '24px', color: CSS.cream, backgroundColor: CSS.pink, padding: { x: 14, y: 5 } })
+          .setOrigin(0.5)
+          .setAngle(-3)
+          .setScale(0);
+        this.tweens.add({ targets: un, scale: 1, delay: 900, duration: 300, ease: 'Back.Out', onStart: () => sfx.powerUp() });
+        c.add(un);
+      }
+    }
     const again = () => {
       if (this.online) {
         // Revanche en ligne : les deux téléphones repartent ensemble.
         this.online.rematch();
         this.scene.restart({ online: this.online, bot: this.bot, speed: this.speed });
-      } else this.scene.restart({ mode: this.mode, level: this.level, speed: this.speed });
+      } else this.scene.restart({ mode: this.mode, level: this.level, fighter: this.ids.left, speed: this.speed });
     };
     c.add(makeButton(this, width / 2 - 160, height * 0.88, 'REVANCHE', COLORS.yellow, again));
     // Solo gagné : on propose le niveau au-dessus. Sinon, retour au menu.
     const nextLevel: AiLevel | null = this.mode === 'solo' && !playerLost ? (this.level === 'easy' ? 'normal' : this.level === 'normal' ? 'hard' : null) : null;
     if (nextLevel) {
-      c.add(makeButton(this, width / 2 + 160, height * 0.88, 'NIVEAU SUIVANT', COLORS.pink, () => this.scene.restart({ mode: 'solo', level: nextLevel, speed: this.speed })));
+      c.add(makeButton(this, width / 2 + 160, height * 0.88, 'NIVEAU SUIVANT', COLORS.pink, () => this.scene.restart({ mode: 'solo', level: nextLevel, fighter: this.ids.left, speed: this.speed })));
     } else {
       c.add(makeButton(this, width / 2 + 160, height * 0.88, 'MENU', COLORS.cyan, () => this.goHome()));
     }

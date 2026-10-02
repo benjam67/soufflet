@@ -11,7 +11,8 @@ Jeu de gifles façon jeu de combat anime des années 90, jouable sur mobile (PWA
 
 - **Solo** contre une IA (facile, normal, difficile), **2 joueurs** sur le même téléphone, **en ligne** avec un code de salon à 4 lettres, **entraînement**.
 - En combat : maintenir pour armer, glisser vers l'adversaire (garder le doigt posé = feinte) ; glisser vers l'arrière à l'impact = esquive ; rage pleine : glisser vers le haut = spéciale, vers le bas en défense = garde de rage.
-- Accès direct par l'URL : `?mode=solo&level=easy|normal|hard`, `?mode=match`, `?mode=online`, `?join=CODE`, `?mode=training`, `?autoplay=1` (démo IA).
+- Progression : XP à chaque match, niveaux, tenues et bars à débloquer (vestiaire de l'écran d'accueil), sauvegardée sur l'appareil.
+- Accès direct par l'URL : `?mode=solo&level=easy|normal|hard&fighter=bernard|lola`, `?mode=match`, `?mode=online`, `?join=CODE`, `?mode=training`, `?autoplay=1` (démo IA).
 
 ## Développement
 

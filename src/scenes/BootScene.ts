@@ -68,7 +68,7 @@ export class BootScene extends Phaser.Scene {
 /**
  * Paramètres d'URL : `?mode=training`, `?mode=solo&level=easy|normal|hard` (contre l'IA), `?autoplay=1` (IA contre IA),
  * `?mode=match` (2 joueurs), `?mode=online` (salon), `?join=CODE` (rejoindre un salon),
- * `?speed=4` (tout accélérer), `?seed=42` (IA reproductible). Sans paramètre : écran d'accueil.
+ * `?fighter=bernard|lola` (perso du joueur), `?speed=4` (tout accélérer), `?seed=42` (IA reproductible). Sans paramètre : écran d'accueil.
  */
 export function fightDataFromUrl(search: string): FightData {
   const q = new URLSearchParams(search);
@@ -78,9 +78,11 @@ export function fightDataFromUrl(search: string): FightData {
   const level: AiLevel = lv === 'easy' || lv === 'hard' ? lv : 'normal';
   const speed = Number(q.get('speed'));
   const seed = Number(q.get('seed'));
+  const f = q.get('fighter');
   return {
     mode,
     level,
+    fighter: f === 'lola' || f === 'bernard' ? f : undefined,
     speed: Number.isFinite(speed) && speed > 0 ? Math.min(speed, 20) : 1,
     seed: Number.isFinite(seed) && q.has('seed') ? seed : undefined,
   };

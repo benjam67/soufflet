@@ -86,7 +86,7 @@ test.describe('phase 6 · jeu en ligne', () => {
         walk(sc.children.list);
         return out;
       });
-    expect(await names()).toEqual(['btn-SOLO', 'btn-2 JOUEURS', 'btn-EN LIGNE', 'btn-ENTRAÎNEMENT']);
+    expect(await names()).toEqual(['btn-SOLO', 'btn-2 JOUEURS', 'btn-EN LIGNE', 'btn-ENTRAÎNEMENT', 'btn-VESTIAIRE']);
     // SOLO → choix du niveau → FACILE lance un match solo facile.
     const tap = async (name: string) => {
       const pos = await page.evaluate((n) => {
@@ -110,7 +110,7 @@ test.describe('phase 6 · jeu en ligne', () => {
     };
     await tap('btn-SOLO');
     await page.waitForTimeout(200);
-    expect(await names()).toEqual(['btn-FACILE', 'btn-NORMAL', 'btn-DIFFICILE', 'btn-← RETOUR']);
+    expect(await names()).toEqual(['btn-FACILE', 'btn-NORMAL', 'btn-DIFFICILE', 'btn-perso', 'btn-← RETOUR']);
     await page.screenshot({ path: `${SHOTS}/phase6-niveaux.png` });
     await tap('btn-FACILE');
     await page.waitForFunction(() => (window.__slap?.state as { mode?: string; level?: string })?.mode === 'solo');
