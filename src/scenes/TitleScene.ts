@@ -8,6 +8,7 @@ import type { SavedSession } from '../net/protocol';
 import { makeButton } from '../ui/button';
 import { COLORS, CSS, FONT_TITLE, FONT_UI } from '../ui/theme';
 import { fighterKey } from './BootScene';
+import { needsInstallHint, safeInsets } from '../ui/safe';
 import type { FightData } from './FightScene';
 import { FIGHTERS, type FighterId } from '../config/balance';
 import { PROGRESS } from '../config/progress';
@@ -65,6 +66,7 @@ export class TitleScene extends Phaser.Scene {
     this.items = [];
     const { width, height } = this.scale;
     const L = computeLayout(width, height);
+    const safe = safeInsets(this);
     const add = <T extends Phaser.GameObjects.GameObject>(o: T) => (this.items.push(o), o);
 
     const p = this.progress;
@@ -151,7 +153,7 @@ export class TitleScene extends Phaser.Scene {
 
     add(
       this.add
-        .text(width / 2, height - 14, 'Un bar de village, à la fermeture. Deux joues. Aucune raison.', {
+        .text(width / 2, height - 14 - safe.bottom, needsInstallHint() ? 'iPhone : pour le plein écran, touche Partager puis « Sur l’écran d’accueil »' : 'Un bar de village, à la fermeture. Deux joues. Aucune raison.', {
           fontFamily: FONT_UI,
           fontStyle: '800',
           fontSize: '17px',
@@ -165,7 +167,7 @@ export class TitleScene extends Phaser.Scene {
 
     const snd = add(
       this.add
-        .image(width - 44, 44, sfx.muted ? 'ico_sound_off' : 'ico_sound_on')
+        .image(width - 44 - Math.max(safe.left, safe.right), 44, sfx.muted ? 'ico_sound_off' : 'ico_sound_on')
         .setDepth(5)
         .setInteractive({ useHandCursor: true }),
     );

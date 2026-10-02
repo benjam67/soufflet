@@ -140,10 +140,12 @@ export class Commentator {
     this.c.setVisible(false);
   }
 
-  layout(width: number, height: number) {
-    this.band.setSize(width + 10, this.h);
-    this.c.setPosition(-5, height - this.h);
-    this.yShown = height - this.h;
+  /** `side` et `bottom` : marges de sécurité de l'écran (encoche, barre d'accueil de l'iPhone). */
+  layout(width: number, height: number, side = 0, bottom = 0) {
+    this.band.setSize(width + 10, this.h + bottom);
+    this.tag.x = 14 + side;
+    this.c.setPosition(-5, height - this.h - bottom);
+    this.yShown = height - this.h - bottom;
     this.yHidden = height + 4;
     if (!this.c.visible) this.c.y = this.yHidden;
   }

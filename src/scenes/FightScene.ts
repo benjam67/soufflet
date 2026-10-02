@@ -21,6 +21,7 @@ import { HealthBar } from '../ui/HealthBar';
 import { RoundPips, TimerDiamond } from '../ui/hud';
 import { COLORS, CSS, FONT_TITLE, FONT_UI } from '../ui/theme';
 import { fighterKey, type Pose } from './BootScene';
+import { safeInsets } from '../ui/safe';
 import { award, loadProgress, saveProgress, tintOf, levelProgress, type Award, type Progress } from '../logic/progress';
 
 export type Mode = 'match' | 'solo' | 'training' | 'autoplay' | 'online';
@@ -521,7 +522,11 @@ export class FightScene extends Phaser.Scene {
     }
 
     // Interface : barres en haut, chrono au centre, losanges des rounds sous les barres.
-    const margin = 22;
+    // Encoche et barre d'accueil (iPhone) : l'interface reste dans la zone sûre, la même marge des deux
+    // côtés pour rester symétrique.
+    const safe = safeInsets(this);
+    const side = Math.max(safe.left, safe.right);
+    const margin = 22 + side;
     const centerGap = 64;
     const barW = width / 2 - margin - centerGap;
     this.f.left.bar.layout(margin, 16, barW);
@@ -532,12 +537,12 @@ export class FightScene extends Phaser.Scene {
     this.f.right.pips.setPosition(width / 2 + centerGap + 20, 66);
     this.timer.setPosition(width / 2, 48);
     this.gauge.layout(margin + 6, height * 0.3, height * 0.52);
-    this.hint.setPosition(width / 2, height - 58);
+    this.hint.setPosition(width / 2, height - 58 - safe.bottom);
     this.modeLabel.setPosition(width / 2, this.mode === 'training' ? 14 : 96);
-    this.soundBtn.setPosition(width - 44, 120);
-    this.homeBtn.setPosition(44, 120);
+    this.soundBtn.setPosition(width - 44 - side, 120);
+    this.homeBtn.setPosition(44 + side, 120);
     this.fx.layout(width, height);
-    this.commentator.layout(width, height);
+    this.commentator.layout(width, height, side, safe.bottom);
 
     if (window.__slap) window.__slap.layout = L;
   }

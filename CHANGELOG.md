@@ -216,3 +216,12 @@ Mesuré par simulation : celui qui ouvre gagnait **61,8 %** des manches.
 **Tests**
 - 137 tests unitaires (dont 10 sur la progression : paliers, XP, déblocages, choix, sauvegarde).
 - Playwright `phase7.spec.ts` : titre → vestiaire → choix du perso → match gagné → résultat et XP → revanche → déblocage → rechargement (tout est conservé) → tenue enfilée, conservée après rechargement et visible en combat ; une défaite rapporte aussi de l'XP.
+
+## iPhone : plein écran et zone sûre — 2026-10-02
+
+Retour du propriétaire après une partie à deux : sur iPhone, le plein écran n'était pas bon. Le droit de réponse est validé.
+
+- Safari sur iPhone n'a **pas** de plein écran pour les pages web : le seul vrai plein écran est l'ajout à l'écran d'accueil (Partager → « Sur l'écran d'accueil »). L'accueil du jeu l'explique quand on est dans Safari sur iPhone/iPad.
+- **Zone sûre** (`src/ui/safe.ts`) : barres de vie, boutons, jauge, aide et bandeau du commentateur s'écartent de l'encoche et de la barre d'accueil ; le décor, lui, va jusqu'au bord. `?safe=gauche,droite,haut,bas` simule ces marges.
+- Zoom bloqué (pincement, double appui) ; le jeu se recale quand les barres de Safari apparaissent ou disparaissent ; hauteur calée sur la zone réellement visible (`100dvh`).
+- Non vérifiable depuis le bac à sable (pas d'iPhone) : testé avec des marges simulées, à confirmer sur l'appareil.

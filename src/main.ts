@@ -49,3 +49,14 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 if (isTouch && !matchMedia('(display-mode: fullscreen)').matches) {
   window.addEventListener('pointerup', goFullscreen, { once: true });
 }
+
+// iPhone : Safari n'a pas de plein écran et ignore `user-scalable=no`. On bloque le zoom (pincement,
+// double appui), et on recale le jeu quand les barres de Safari apparaissent ou disparaissent.
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('dblclick', (e) => e.preventDefault());
+const refit = () => {
+  window.scrollTo(0, 0);
+  game.scale.refresh();
+};
+window.visualViewport?.addEventListener('resize', refit);
+window.addEventListener('orientationchange', () => window.setTimeout(refit, 300));
