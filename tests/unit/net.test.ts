@@ -30,7 +30,7 @@ describe('code de salon', () => {
   });
 
   it('donne un identifiant de salon stable, hôte à gauche et invité à droite', () => {
-    expect(peerIdFor('ABCD')).toBe('slap-fighter-v1-ABCD');
+    expect(peerIdFor('ABCD')).toBe('slap-fighter-v2-ABCD');
     expect(sideOf('host')).toBe('left');
     expect(sideOf('guest')).toBe('right');
   });

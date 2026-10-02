@@ -1,6 +1,7 @@
 // Simulation de matchs complets sans affichage (IA contre IA).
 import type { FighterId } from '../config/balance';
-import { aiDecide, AI_PROFILES, type AiProfile } from './ai';
+import { aiDecide, aiDefend, AI_PROFILES, type AiProfile } from './ai';
+import { other } from './match';
 import { Match, type Side } from './match';
 import { createRng, type Rng } from './rng';
 import { stunCurve } from './slap';
@@ -22,6 +23,11 @@ export interface SimResult {
   timeouts: number;
   specials: number;
   stuns: number;
+  /** Gifles esquivées (correctes, parfaites ou garde de rage) et gifles données. */
+  dodges: number;
+  slaps: number;
+  /** Manches gagnées par celui qui les a ouvertes. */
+  openerRounds: number;
 }
 
 export function simulateMatch(
@@ -38,24 +44,34 @@ export function simulateMatch(
   let timeouts = 0;
   let specials = 0;
   let stuns = 0;
+  let dodges = 0;
+  let slaps = 0;
+  let opener: Side = first;
+  let openerRounds = 0;
   m.startRound();
   ms += ROUND_OVERHEAD_MS;
   while (m.phase !== 'matchOver') {
     if (m.totalTurns > maxTurns) throw new Error('Match sans fin');
     if (m.phase === 'roundOver') {
       m.startRound();
+      opener = m.turn;
       ms += ROUND_OVERHEAD_MS;
       continue;
     }
     const side = m.turn;
-    const d = aiDecide(rng, m.ids[side], profiles[side], m.stunned[side] ? stunCurve(rng) : 1);
-    ms += d.startDelayMs + d.holdMs + d.swipeMs + TURN_OVERHEAD_MS;
+    const d = aiDecide(rng, m.ids[side], profiles[side], m.stunned[side] ? stunCurve(rng) : 1, m.specialReady[side]);
+    // Celui qui reçoit tente une esquive (ou dépense sa rage en garde).
+    if (d.action.type === 'slap') Object.assign(d.action, aiDefend(rng, profiles[other(side)], d.feintMs, m.specialReady[other(side)]));
+    ms += d.startDelayMs + d.holdMs + d.swipeMs + d.feintMs + TURN_OVERHEAD_MS;
     for (const e of m.play(d.action)) {
+      if (e.type === 'hit' && e.defense) dodges++;
+      if (e.type === 'hit' && e.kind !== 'limp') slaps++;
       if (e.type === 'hit' && e.result?.critical) crits++;
       if (e.type === 'hit' && e.kind === 'special') specials++;
       if (e.type === 'stunned') stuns++;
       if (e.type === 'selfhit') selfSlaps++;
       if (e.type === 'hit' && e.kind === 'limp') timeouts++;
+      if (e.type === 'roundOver' && e.winner === opener) openerRounds++;
     }
   }
   const winner = m.winner!;
@@ -70,6 +86,9 @@ export function simulateMatch(
     timeouts,
     specials,
     stuns,
+    dodges,
+    slaps,
+    openerRounds,
   };
 }
 
@@ -84,6 +103,10 @@ export interface SimSummary {
   timeoutRate: number;
   specialsPerMatch: number;
   stunsPerMatch: number;
+  /** Part des gifles esquivées. */
+  dodgeRate: number;
+  /** Part des manches gagnées par celui qui les ouvre (50 % = aucun avantage). */
+  openerWinRate: number;
 }
 
 /**
@@ -101,6 +124,9 @@ export function simulateMany(n: number, seed = 1, profile: AiProfile = AI_PROFIL
   let timeouts = 0;
   let specials = 0;
   let stuns = 0;
+  let dodges = 0;
+  let slaps = 0;
+  let openerRounds = 0;
   for (let i = 0; i < n; i++) {
     const swap = i % 2 === 1;
     const ids: Record<Side, FighterId> = swap ? { left: 'lola', right: 'bernard' } : { left: 'bernard', right: 'lola' };
@@ -115,6 +141,9 @@ export function simulateMany(n: number, seed = 1, profile: AiProfile = AI_PROFIL
     timeouts += r.timeouts;
     specials += r.specials;
     stuns += r.stuns;
+    dodges += r.dodges;
+    slaps += r.slaps;
+    openerRounds += r.openerRounds;
   }
   return {
     matches: n,
@@ -127,6 +156,8 @@ export function simulateMany(n: number, seed = 1, profile: AiProfile = AI_PROFIL
     timeoutRate: timeouts / turns,
     specialsPerMatch: specials / n,
     stunsPerMatch: stuns / n,
+    dodgeRate: dodges / Math.max(1, slaps),
+    openerWinRate: openerRounds / rounds,
   };
 }
 

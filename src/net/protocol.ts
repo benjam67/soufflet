@@ -1,12 +1,12 @@
 // Protocole du jeu en ligne (pur, sans réseau) : code de salon, messages, synchronisation.
 //
 // Principe : un match est entièrement déterminé par la suite des actions jouées
-// (charge, vitesse, angle de chaque gifle). Chaque téléphone joue ses propres tours et envoie
+// (charge, vitesse, angle de chaque gifle, esquive de celui qui reçoit). Chaque téléphone joue ses propres tours et envoie
 // l'action à l'autre ; les deux déroulent le même `Match`. Pour reprendre après une coupure
 // ou un rechargement, il suffit de comparer les journaux d'actions et de rejouer ce qui manque.
 import type { TurnAction } from '../logic/match';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Lettres du code de salon : sans I ni O (trop proches de 1 et 0 quand on dicte le code). */
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -41,8 +41,24 @@ export type NetMsg =
   /** Le joueur dont c'est le tour a posé le doigt / l'a levé sans gifler (pour l'animation en face). */
   | { t: 'press'; matchId: number; n: number }
   | { t: 'cancel'; matchId: number; n: number }
+  /** Étapes du tour en cours, pour l'animation et l'esquive en face (rien n'est écrit au journal). */
+  | { t: 'stage'; matchId: number; n: number; stage: Stage }
   | { t: 'rematch'; matchId: number }
   | { t: 'ping' };
+
+/**
+ * Étapes d'un tour, envoyées au fil de l'eau :
+ * - `armed` : le swipe est fait, la gifle est retenue (feinte possible) ;
+ * - `special` : la spéciale est déclenchée ; `spin` : La Toupie compte une gifle de plus ;
+ * - `attack` : la gifle part (l'autre téléphone la montre et juge l'esquive de son joueur) ;
+ * - `defense` : réponse de celui qui reçoit — celui qui gifle l'ajoute à son action et la valide.
+ */
+export type Stage =
+  | { k: 'armed' }
+  | { k: 'special' }
+  | { k: 'spin'; count: number }
+  | { k: 'attack'; feintMs: number }
+  | { k: 'defense'; defense?: 'good' | 'perfect'; rageGuard?: boolean };
 
 export interface NetState {
   matchId: number;

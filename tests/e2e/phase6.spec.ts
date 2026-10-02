@@ -150,6 +150,14 @@ test.describe('phase 6 · jeu en ligne', () => {
     await Promise.all([over(host), over(guest)]);
     const a = await expectSameMatch(host, guest);
     expect(a.wins[a.winner!]).toBe(2);
+    // Les esquives se jugent sur le téléphone de celui qui reçoit, puis sont validées par celui qui
+    // gifle : les deux journaux sont identiques, et des esquives sont bien passées par le réseau.
+    const logOf = (p: Page) => p.evaluate(() => (window.__slap!.game!.scene.getScene('Fight') as unknown as { online: { log: { defense?: string; rageGuard?: boolean }[] } }).online.log);
+    const [lh, lg] = [await logOf(host), await logOf(guest)];
+    expect(lg).toEqual(lh);
+    const dodges = lh.filter((x) => x.defense || x.rageGuard).length;
+    console.log(`en ligne : ${lh.length} tours, ${dodges} esquives transmises`);
+    expect(dodges).toBeGreaterThan(0);
     // L'un voit « VICTOIRE ! », l'autre « DÉFAITE… ».
     const [th, tg] = [await texts(host), await texts(guest)];
     expect(th).toContain(a.winner === 'left' ? 'VICTOIRE !' : 'DÉFAITE…');

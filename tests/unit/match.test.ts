@@ -74,12 +74,14 @@ describe('match : rounds et victoire', () => {
   it('K.O. à 0 PV : fin du round, le vainqueur marque', () => {
     const m = new Match('bernard', 'lola');
     m.startRound();
-    m.hp.right = 3;
+    m.play(weak); // Bernard ouvre la manche
+    m.hp.left = 3;
+    // Lola (qui n'a pas ouvert) met Bernard K.O. : les deux ont joué autant de tours, c'est fini.
     const ev = m.play(weak);
     expect(types(ev)).toEqual(['hit', 'ko', 'roundOver']);
-    expect(ev[1]).toEqual({ type: 'ko', loser: 'right' });
-    expect(ev[2]).toMatchObject({ type: 'roundOver', round: 1, winner: 'left', wins: { left: 1, right: 0 } });
-    expect(m.hp.right).toBe(0);
+    expect(ev[1]).toEqual({ type: 'ko', loser: 'left' });
+    expect(ev[2]).toMatchObject({ type: 'roundOver', round: 1, winner: 'right', wins: { left: 0, right: 1 } });
+    expect(m.hp.left).toBe(0);
     expect(m.phase).toBe('roundOver');
     // Plus aucune action tant que le round suivant n'a pas commencé.
     expect(m.play(weak)).toEqual([]);

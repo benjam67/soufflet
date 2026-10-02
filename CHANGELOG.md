@@ -168,3 +168,36 @@
   - coupure de connexion en plein match → bandeau, reconnexion, même résultat final ;
   - page rechargée en plein match (invité, puis hôte) → reprise, même résultat final.
 - Limite : ces tests passent par un serveur de mise en relation local. Le serveur public de PeerJS et la traversée des box / réseaux mobiles ne peuvent pas être essayés depuis le bac à sable : c'est l'objet du test du propriétaire.
+
+## Mise à jour « moins prévisible » · esquive, feinte, spéciales volontaires, droit de réponse — 2026-10-02
+
+Retour du propriétaire : le jeu est trop prévisible, celui qui ouvre la manche la gagne souvent.
+Mesuré par simulation : celui qui ouvre gagnait **61,8 %** des manches.
+
+**Fait**
+- **Esquive** : celui qui reçoit glisse le doigt **vers l'arrière** au moment de l'impact. Correcte (jusqu'à 170 ms avant l'impact) : −30 % de dégâts ; parfaite (70 ms) : −60 % et +10 de rage. En avance ou en retard : rien, mais **aucune pénalité**. Un seul essai par gifle.
+- **Feinte** : le swipe fait, tant que le doigt reste posé, la gifle est retenue (0,8 s au maximum, puis elle part toute seule). Le chrono du tour s'arrête pendant la feinte. Celui qui recule trop tôt a grillé son essai.
+- La gifle met désormais **360 ms** à arriver une fois lâchée (pose d'élan, pas en avant) : c'est le temps de la voir venir.
+- **Spéciales volontaires** : rage pleine, on **glisse vers le haut** pour déclencher sa spéciale (sinon la gifle reste normale et la rage est gardée).
+  - *Le Battoir* : jauge plus lente (×0,8), zone dorée étroite (84–90 %), une gifle ×2.
+  - *La Toupie* : après la première gifle, on re-glisse jusqu'à 2 fois en rythme (entre 0,18 s et 0,7 s après la précédente) ; chaque gifle placée compte (×0,8 chacune). Trop vite : le rythme est cassé.
+- **Garde de rage** : rage pleine en défense, on **glisse vers le bas** → esquive parfaite garantie, toute la rage est dépensée (plus de spéciale).
+- **État sonné adouci** : il faut toujours 25 dégâts d'un coup, mais une esquive fait passer la plupart des gros coups sous le seuil.
+- **Droit de réponse** (`MATCH.rightOfReply`, activable/désactivable en une ligne) : si celui qui a ouvert la manche met l'autre K.O., ce dernier rend une dernière gifle avant de tomber — les deux jouent ainsi le même nombre de tours. Double K.O. : gagne celui qui est le moins « en dessous de zéro ».
+- À deux sur le même téléphone, chacun joue sur **sa moitié d'écran** (un doigt gifle pendant que l'autre esquive).
+- Visuels provisoires (pas de nouveaux dessins) : l'esquive est un recul du perso avec une teinte — bleu (correcte), or (parfaite), rose (garde de rage) — et une étiquette ; celui qui joue son droit de réponse est teinté de rouge. À remplacer par de vraies poses plus tard.
+- IA : elle esquive, mord (ou non) aux feintes, feinte elle-même, déclenche ses spéciales et tient plus ou moins le rythme de La Toupie selon le niveau.
+- En ligne (protocole v2) : chaque téléphone juge l'esquive de son propre joueur (pas de décalage dû au réseau), l'envoie à celui qui gifle, qui valide l'action ; le journal des actions reste la seule référence.
+- L'esquive est jugée sur le temps du jeu (l'animation que le joueur voit), pas sur l'horloge : si le téléphone saccade, la fenêtre suit l'image.
+
+**Résultats (3 × 1000 matchs simulés)**
+- Manches gagnées par celui qui ouvre : 61,8 % → **49,5 %**. L'esquive seule ne donnait que ~58 % : c'est le droit de réponse qui supprime vraiment l'avantage.
+- Bernard 50–53 % / Lola 47–50 %, ~114 s et ~32 tours par match, 45 % des gifles esquivées, ~3,2 spéciales et ~3,7 « sonnés » par match.
+- Niveaux de l'IA recalibrés contre le joueur moyen : facile ~30 %, difficile ~62 %.
+
+**Réglages** (`src/config/balance.ts`) : `DEFENSE` (fenêtres, réductions, temps de trajet, durée de feinte), `COMBO` (rythme de La Toupie), `MATCH.rightOfReply`, La Toupie ×0,7 → ×0,8 par gifle.
+
+**Tests**
+- 127 tests unitaires (esquive, garde de rage, geste d'esquive, feinte, spéciales volontaires, droit de réponse, double K.O., rejeu du journal, avantage de l'ouvreur ≈ 50 %).
+- Playwright : nouveau fichier `esquive.spec.ts` (8 tests) ; spéciales et jeu en ligne mis à jour (les esquives passent bien par le réseau, journaux identiques des deux côtés).
+- Les gestes à timing serré sont joués dans la page au rythme de l'horloge du jeu : le bac à sable de test est trop lent et irrégulier pour les jouer « en vrai ».

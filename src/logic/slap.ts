@@ -1,6 +1,6 @@
 // Règles pures de la gifle : charge, zone dorée, surchauffe, swipe, dégâts.
 // Aucune dépendance à Phaser : tout est testable seul.
-import { ADVANCED, FIGHTERS, SLAP, type FighterId } from '../config/balance';
+import { ADVANCED, DEFENSE, FIGHTERS, SLAP, type FighterId } from '../config/balance';
 import type { Rng } from './rng';
 
 /**
@@ -94,6 +94,25 @@ export interface SlapInput {
   angle: number;
   /** Multiplicateur supplémentaire (gifles spéciales, phase 5). */
   extra?: number;
+  /** Zone dorée à utiliser à la place de celle du perso (spéciale). */
+  zone?: readonly [number, number];
+  /** Esquive de celui qui reçoit : réduit les dégâts. */
+  defense?: DefenseQuality | null;
+}
+
+/** Qualité d'une esquive : correcte, ou parfaite. */
+export type DefenseQuality = 'good' | 'perfect';
+
+/**
+ * Juge une esquive : l'instant où le swipe arrière est fait, comparé à l'instant de l'impact.
+ * Trop tôt ou trop tard : pas d'esquive, mais aucune pénalité.
+ */
+export function judgeDefense(swipeAt: number | null, impactAt: number): DefenseQuality | null {
+  if (swipeAt === null) return null;
+  const gap = Math.abs(swipeAt - impactAt);
+  if (gap <= DEFENSE.perfectWindowMs) return 'perfect';
+  if (gap <= DEFENSE.goodWindowMs) return 'good';
+  return null;
 }
 
 export interface SlapResult {
@@ -103,6 +122,9 @@ export interface SlapResult {
   factors: { B: number; C: number; V: number; P: number; K: number; Rd: number };
   /** Qualité du contact, pour les réactions : nette, effleurée ou ratée. */
   contact: 'clean' | 'grazed' | 'missed';
+  /** Esquive appliquée, et dégâts qu'elle a évités. */
+  defense: DefenseQuality | null;
+  avoided: number;
 }
 
 /** D = B × C/100 × V × P × K × R_d, arrondi à l'entier (au moins 1 si la gifle part). */
@@ -110,7 +132,7 @@ export function computeSlap(input: SlapInput): SlapResult {
   const a = FIGHTERS[input.attacker];
   const d = FIGHTERS[input.defender];
   const C = Math.max(0, Math.min(100, input.charge));
-  const critical = isGolden(C, a.goldenZone);
+  const critical = isGolden(C, input.zone ?? a.goldenZone);
   const factors = {
     B: a.base,
     C,
@@ -119,8 +141,11 @@ export function computeSlap(input: SlapInput): SlapResult {
     K: critical ? SLAP.criticalMultiplier : 1,
     Rd: d.resistance,
   };
-  const raw = factors.B * (factors.C / 100) * factors.V * factors.P * factors.K * factors.Rd * (input.extra ?? 1);
+  const full = factors.B * (factors.C / 100) * factors.V * factors.P * factors.K * factors.Rd * (input.extra ?? 1);
+  const defense = input.defense ?? null;
+  const raw = full * (1 - (defense ? DEFENSE.reduction[defense] : 0));
   const damage = C > 0 ? Math.max(1, Math.round(raw)) : 0;
+  const undefended = C > 0 ? Math.max(1, Math.round(full)) : 0;
   const contact = factors.P >= 1 ? 'clean' : factors.P >= 0.7 ? 'grazed' : 'missed';
-  return { damage, raw, critical, factors, contact };
+  return { damage, raw, critical, factors, contact, defense, avoided: undefended - damage };
 }

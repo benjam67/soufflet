@@ -57,7 +57,7 @@ describe('gifles spéciales', () => {
     m.startRound();
     m.specialReady.left = true;
     m.rage.left = 100;
-    const ev = m.play(slap);
+    const ev = m.play({ ...slap, special: { hits: [{ speed: 1.4, angle: 0 }] } });
     const hit = find(ev, 'hit')!;
     const normal = computeSlap({ attacker: 'bernard', defender: 'lola', charge: 60, speed: 1.4, angle: 0 });
     const boosted = computeSlap({ attacker: 'bernard', defender: 'lola', charge: 60, speed: 1.4, angle: 0, extra: FIGHTERS.bernard.special.multiplier });
@@ -69,19 +69,60 @@ describe('gifles spéciales', () => {
     expect(m.specialReady.left).toBe(false);
   });
 
-  it('La Toupie : 3 gifles à ×0,7', () => {
+  it('La Toupie : 3 gifles à ×0,8 quand le rythme est tenu', () => {
     const m = new Match('bernard', 'lola');
     m.startRound();
     m.play(miss); // Bernard
     m.specialReady.right = true;
     m.rage.right = 100;
-    const ev = m.play(slap); // Lola
+    const swing = { speed: 1.4, angle: 0 };
+    const ev = m.play({ ...slap, special: { hits: [swing, swing, swing] } }); // Lola
     const hit = find(ev, 'hit')!;
-    const each = computeSlap({ attacker: 'lola', defender: 'bernard', charge: 60, speed: 1.4, angle: 0, extra: 0.7 }).damage;
+    const each = computeSlap({ attacker: 'lola', defender: 'bernard', charge: 60, speed: 1.4, angle: 0, extra: FIGHTERS.lola.special.multiplier }).damage;
     expect(hit.special).toEqual({ name: 'La Toupie', hits: [each, each, each] });
     expect(hit.damage).toBe(3 * each);
     expect(m.hp.left).toBe(MATCH.hp - 3 * each);
     expect(m.rage.right).toBe(0);
+  });
+
+  it('La Toupie : rythme cassé, une seule gifle part (et la rage est dépensée quand même)', () => {
+    const m = new Match('bernard', 'lola');
+    m.startRound();
+    m.play(miss);
+    m.specialReady.right = true;
+    m.rage.right = 100;
+    const hit = find(m.play({ ...slap, special: { hits: [{ speed: 1.4, angle: 0 }] } }), 'hit')!;
+    expect(hit.special!.hits).toHaveLength(1);
+    expect(m.specialReady.right).toBe(false);
+  });
+
+  it('la spéciale est volontaire : rage pleine, une gifle normale reste normale et garde la rage', () => {
+    const m = new Match('bernard', 'lola');
+    m.startRound();
+    m.specialReady.left = true;
+    m.rage.left = 100;
+    const hit = find(m.play(slap), 'hit')!;
+    expect(hit.kind).toBe('slap');
+    expect(m.specialReady.left).toBe(true);
+    expect(m.rage.left).toBe(100);
+  });
+
+  it('sans rage pleine, demander une spéciale ne donne qu’une gifle normale', () => {
+    const m = new Match('bernard', 'lola');
+    m.startRound();
+    const hit = find(m.play({ ...slap, special: { hits: [{ speed: 1.4, angle: 0 }] } }), 'hit')!;
+    expect(hit.kind).toBe('slap');
+  });
+
+  it('Le Battoir a sa propre zone dorée, plus étroite', () => {
+    const m = new Match('bernard', 'lola');
+    m.startRound();
+    m.hp.right = 1000;
+    m.specialReady.left = true;
+    // 82 % : critique pour une gifle normale (80–90), pas pour Le Battoir (84–90).
+    const hit = find(m.play({ type: 'slap', charge: 82, speed: 1.4, angle: 0, special: { hits: [{ speed: 1.4, angle: 0 }] } }), 'hit')!;
+    expect(hit.result!.critical).toBe(false);
+    expect(computeSlap({ attacker: 'bernard', defender: 'lola', charge: 82, speed: 1.4, angle: 0 }).critical).toBe(true);
   });
 
   it('une gifle molle ou une surchauffe ne gaspille pas la spéciale', () => {

@@ -9,7 +9,7 @@ test(`rapport d'équilibrage (${N} matchs × 3 graines)`, () => {
     process.stdout.write(
       `graine ${seed} : Bernard ${(s.winRate.bernard * 100).toFixed(1)} % · Lola ${(s.winRate.lola * 100).toFixed(1)} % · ` +
         `${s.avgSeconds.toFixed(0)} s · ${s.avgTurns.toFixed(1)} tours · ${s.avgRounds.toFixed(2)} rounds · ` +
-        `critiques ${(s.critRate * 100).toFixed(0)} % · surchauffes ${(s.selfSlapRate * 100).toFixed(1)} % · chrono ${(s.timeoutRate * 100).toFixed(1)} % · spéciales ${s.specialsPerMatch.toFixed(2)}/match · sonnés ${s.stunsPerMatch.toFixed(2)}/match\n`,
+        `critiques ${(s.critRate * 100).toFixed(0)} % · surchauffes ${(s.selfSlapRate * 100).toFixed(1)} % · chrono ${(s.timeoutRate * 100).toFixed(1)} % · spéciales ${s.specialsPerMatch.toFixed(2)}/match · sonnés ${s.stunsPerMatch.toFixed(2)}/match · esquives ${(s.dodgeRate * 100).toFixed(0)} % · manches gagnées par celui qui ouvre ${(s.openerWinRate * 100).toFixed(1)} %\n`,
     );
   }
 });

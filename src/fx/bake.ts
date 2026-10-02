@@ -88,6 +88,8 @@ export function bakeAll(scene: Phaser.Scene) {
   bakeText(scene, 'ann_fight', 'BAGARRE !', title(120, CSS.pink, 16));
   bakeText(scene, 'ann_ko', 'K.O. !', title(150, CSS.yellow, 18));
   bakeText(scene, 'ann_resume', 'REPRISE !', title(100, CSS.cyan, 15));
+  bakeText(scene, 'ann_lastword', 'DROIT DE RÉPONSE !', title(74, CSS.cyan, 13));
+  bakeText(scene, 'ann_double_ko', 'DOUBLE K.O. !', title(120, CSS.yellow, 17));
   for (const id of Object.keys(FIGHTERS) as (keyof typeof FIGHTERS)[]) {
     const name = FIGHTERS[id].short.toUpperCase();
     bakeText(scene, `ban_turn_${id}`, `À TOI, ${name} !`, title(52, CSS.cream, 10));
@@ -123,6 +125,10 @@ export function bakeAll(scene: Phaser.Scene) {
   bakeText(scene, 'lbl_self', LABELS.self, tag(CSS.red));
   bakeText(scene, 'lbl_stun', 'SONNÉ !', tag(CSS.cyan));
   bakeText(scene, 'lbl_special', 'SPÉCIALE !', tag(CSS.pink));
+  bakeText(scene, 'lbl_dodge', 'ESQUIVE !', { ...tag(CSS.cyan), color: CSS.ink });
+  bakeText(scene, 'lbl_perfect', 'ESQUIVE PARFAITE !', { ...tag(CSS.yellow), color: CSS.ink });
+  bakeText(scene, 'lbl_guard', 'GARDE DE RAGE !', tag(CSS.pink));
+  for (const n of [2, 3]) bakeText(scene, `lbl_x${n}`, `×${n}`, title(64, CSS.pink, 11));
   bakeText(scene, 'lbl_ragemax', 'RAGE MAX !', {
     fontFamily: FONT_TITLE,
     fontSize: '15px',

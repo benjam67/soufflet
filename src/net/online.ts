@@ -1,7 +1,7 @@
 // Partie en ligne : relie la connexion (NetSession) au match — journal des actions,
 // file des actions reçues, sauvegarde locale, revanche.
 import type { TurnAction } from '../logic/match';
-import { clearSession, PROTOCOL_VERSION, reconcile, saveSession, sideOf, type NetMsg } from './protocol';
+import { clearSession, PROTOCOL_VERSION, reconcile, saveSession, sideOf, type NetMsg, type Stage } from './protocol';
 import type { NetSession, NetStatus } from './session';
 
 export class OnlineGame {
@@ -14,6 +14,7 @@ export class OnlineGame {
   // Branchés par la scène de combat.
   onPress: () => void = () => {};
   onCancel: () => void = () => {};
+  onStage: (stage: Stage) => void = () => {};
   onStatus: (status: NetStatus) => void = () => {};
   /** L'état distant fait foi (ou revanche) : la scène doit repartir du journal. */
   onRestart: () => void = () => {};
@@ -79,6 +80,9 @@ export class OnlineGame {
       case 'cancel':
         if (msg.matchId === this.matchId && msg.n === this.log.length) this.onCancel();
         break;
+      case 'stage':
+        if (msg.matchId === this.matchId && msg.n === this.log.length) this.onStage(msg.stage);
+        break;
       case 'rematch':
         if (msg.matchId > this.matchId) {
           this.matchId = msg.matchId;
@@ -121,6 +125,10 @@ export class OnlineGame {
 
   sendCancel() {
     this.session.send({ t: 'cancel', matchId: this.matchId, n: this.log.length });
+  }
+
+  sendStage(stage: Stage) {
+    this.session.send({ t: 'stage', matchId: this.matchId, n: this.log.length, stage });
   }
 
   /** Lance une revanche des deux côtés. */

@@ -15,7 +15,16 @@ export interface FighterBalance {
   goldenZone: [number, number];
   /** Résistance R_d appliquée aux dégâts reçus. */
   resistance: number;
-  special: { name: string; hits: number; multiplier: number };
+  special: {
+    name: string;
+    /** Nombre maximal de gifles (La Toupie : 3, à enchaîner en rythme). */
+    hits: number;
+    multiplier: number;
+    /** Zone dorée propre à la spéciale (plus étroite), si elle diffère. */
+    goldenZone?: [number, number];
+    /** La jauge monte plus lentement pendant la spéciale (1 = normal). */
+    chargeSpeed?: number;
+  };
 }
 
 export const FIGHTERS: Record<FighterId, FighterBalance> = {
@@ -27,8 +36,8 @@ export const FIGHTERS: Record<FighterId, FighterBalance> = {
     chargeTimeMs: 1400,
     goldenZone: [80, 90],
     resistance: 0.85,
-    // ×1,8 dans la roadmap ; ×2,0 pour équilibrer avec La Toupie (3 × 0,7) — voir CHANGELOG, phase 5.
-    special: { name: 'Le Battoir', hits: 1, multiplier: 2.0 },
+    // Le Battoir : une seule gifle énorme, charge lente et zone dorée étroite (à doser soi-même).
+    special: { name: 'Le Battoir', hits: 1, multiplier: 2.0, goldenZone: [84, 90], chargeSpeed: 0.8 },
   },
   lola: {
     name: 'Lola Tornade',
@@ -40,7 +49,9 @@ export const FIGHTERS: Record<FighterId, FighterBalance> = {
     chargeTimeMs: 1000,
     goldenZone: [76, 92],
     resistance: 1.0,
-    special: { name: 'La Toupie', hits: 3, multiplier: 0.7 },
+    // La Toupie : jusqu'à 3 gifles à enchaîner en rythme. ×0,8 chacune (×0,7 avant que le rythme
+    // soit à tenir soi-même : on n'en place plus toujours trois).
+    special: { name: 'La Toupie', hits: 3, multiplier: 0.8 },
   },
 };
 
@@ -50,6 +61,12 @@ export const MATCH = {
   hp: 100,
   turnTimeMs: 3000,
   limpSlapDamage: 5,
+  /**
+   * Droit de réponse : si celui qui a ouvert la manche met l'autre K.O., ce dernier rend une
+   * dernière gifle. Les deux jouent ainsi le même nombre de tours. Double K.O. : gagne celui
+   * qui est le moins « en dessous de zéro » ; égalité parfaite : avantage à celui qui répondait.
+   */
+  rightOfReply: true,
 };
 
 export const SLAP = {
@@ -66,6 +83,26 @@ export const SLAP = {
     { maxAngleDeg: 90, factor: 0.2 },
   ],
 };
+
+/** Esquive, feinte et garde de rage. */
+export const DEFENSE = {
+  /** Longueur minimale du swipe vers l'arrière (px écran). */
+  minSwipePx: 40,
+  /** Temps entre le départ de la gifle (doigt levé) et l'impact : le temps de la voir venir. */
+  travelMs: 360,
+  /** Écart maximal entre l'esquive et l'impact pour une esquive parfaite / correcte (ms). */
+  perfectWindowMs: 70,
+  goodWindowMs: 170,
+  /** Part des dégâts évitée. */
+  reduction: { good: 0.3, perfect: 0.6 },
+  /** Rage gagnée par une esquive parfaite. */
+  perfectRageBonus: 10,
+  /** Feinte : durée maximale pendant laquelle l'attaquant peut retenir sa gifle, doigt posé. */
+  feintMaxMs: 800,
+};
+
+/** La Toupie : délai accepté entre deux gifles de l'enchaînement (ms). */
+export const COMBO = { minGapMs: 180, maxGapMs: 700 };
 
 export const ADVANCED = {
   rageMax: 100,

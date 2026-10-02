@@ -1,16 +1,17 @@
 import Phaser from 'phaser';
 import assets from '../config/assets.json';
-import { ADVANCED, FIGHTERS, MATCH, SLAP, STAGE, type FighterId } from '../config/balance';
+import { ADVANCED, COMBO, DEFENSE, FIGHTERS, MATCH, SLAP, STAGE, type FighterId } from '../config/balance';
 import { CHEEK } from '../config/sprites';
 import type { CommentKind } from '../config/comments';
 import { computeLayout, computeStrike, HABITUES, type StageLayout } from '../logic/layout';
-import { SlapGesture, type GestureOutcome } from '../logic/gesture';
-import { chargeAt, computeSlap, stunCurve, type ChargeSpeed, type SlapResult } from '../logic/slap';
+import { DefenseGesture, SlapGesture, type DefenseMove, type GestureOutcome } from '../logic/gesture';
+import { chargeAt, computeSlap, judgeDefense, stunCurve, swipeAngle, type ChargeSpeed, type DefenseQuality, type SlapResult } from '../logic/slap';
 import { Match, other, replayMatch, type MatchEvent, type Side, type TurnAction } from '../logic/match';
 import type { OnlineGame } from '../net/online';
+import type { Stage } from '../net/protocol';
 import { showNetLost } from '../net/lobby';
 import { makeButton } from '../ui/button';
-import { aiDecide, AI_PROFILES, LEVEL_LABEL, LEVEL_PROFILE, type AiLevel, type AiProfile } from '../logic/ai';
+import { aiDecide, aiDefend, AI_PROFILES, LEVEL_LABEL, LEVEL_PROFILE, scaleSpeed, type AiLevel, type AiProfile } from '../logic/ai';
 import { createRng, type Rng } from '../logic/rng';
 import { sfx } from '../audio/sfx';
 import { announceImage, bannerImage, Fx, type LabelKey } from '../fx/Fx';
@@ -55,7 +56,20 @@ interface Fighter {
   readyTag: Phaser.GameObjects.Image | null;
 }
 
-type ScenePhase = 'intro' | 'banner' | 'ready' | 'charging' | 'busy' | 'roundEnd' | 'over';
+/**
+ * `armed` : le swipe est fait, la gifle est retenue (feinte). `combo` : La Toupie attend les gifles
+ * suivantes. `travel` : la gifle est partie, celui qui reçoit peut esquiver. `await` : en ligne,
+ * on attend l'esquive (ou l'action validée) de l'autre téléphone.
+ */
+type ScenePhase = 'intro' | 'banner' | 'ready' | 'charging' | 'armed' | 'combo' | 'travel' | 'await' | 'busy' | 'roundEnd' | 'over';
+type SlapAction = Extract<TurnAction, { type: 'slap' }>;
+type HitEvent = Extract<MatchEvent, { type: 'hit' }>;
+/** Ce que fait celui qui reçoit : esquive au timing, ou garde de rage. */
+type Defense = { defense?: DefenseQuality; rageGuard?: boolean };
+/** En ligne : temps d'attente maximal de l'esquive de l'adversaire (ms réelles). */
+const DEFENSE_WAIT_MS = 1200;
+/** Teintes de l'esquive (en attendant les vraies poses) : bleu = correcte, or = parfaite, rose = garde de rage. */
+const DODGE_TINT = { good: 0x8fd8ff, perfect: 0xffe27a, rage: 0xff9cc8 } as const;
 
 /** Arrêt sur image au contact, avant la réaction (direction artistique : 80 ms). */
 const HITSTOP_MS = 80;
@@ -96,7 +110,7 @@ export class FightScene extends Phaser.Scene {
   private lastTickSecond = -1;
   private turnsPlayed = 0;
   private slapCount = 0;
-  private lastResult: (SlapResult & { kind: 'slap' | 'special' }) | { kind: 'selfslap' | 'limp'; damage: number } | null = null;
+  private lastResult: (SlapResult & { kind: 'slap' | 'special'; dodge: DefenseQuality | 'rage' | null }) | { kind: 'selfslap' | 'limp'; damage: number } | null = null;
   private aiTimers: Phaser.Time.TimerEvent[] = [];
   private frozen = false;
   private slowToken = 0;
@@ -107,6 +121,42 @@ export class FightScene extends Phaser.Scene {
   private pendingPress = false;
   private overheatSeen = false;
   private homeBtn!: Phaser.GameObjects.Image;
+  /** Geste de celui qui reçoit (un seul essai par gifle) et doigts qui le font. */
+  private defGesture: DefenseGesture | null = null;
+  private defPointers = new Set<number>();
+  private defMove: DefenseMove | null = null;
+  /**
+   * Instant de l'esquive dans le trajet de la gifle (ms de jeu depuis son départ ; très négatif si
+   * elle a été faite avant). On juge sur le temps du jeu, celui de l'animation que le joueur voit :
+   * si le téléphone saccade, la fenêtre d'esquive suit l'image, pas l'horloge.
+   */
+  private defAt: number | null = null;
+  private travelMs = 0;
+  private lastFrameAt = 0;
+  /** Heure du dernier lever de doigt de celui qui gifle (rythme de La Toupie). */
+  private liftAt = 0;
+  /** Combien de fois l'aide « esquive » a été montrée à chaque joueur. */
+  private defHints: Record<Side, number> = { left: 0, right: 0 };
+  /** La spéciale est déclenchée pour ce tour. */
+  private specialOn = false;
+  /** La Toupie : gifles déjà placées, en attendant la suivante. */
+  private combo: {
+    base: SlapAction;
+    hits: { speed: number; angle: number }[];
+    lastAt: number;
+    feintMs: number;
+    timer: Phaser.Time.TimerEvent | null;
+    start: { id: number; t: number; x: number; y: number } | null;
+  } | null = null;
+  /** Gifle partie, pas encore arrivée. `action` est inconnue quand elle vient de l'adversaire en ligne. */
+  private pending: { action: SlapAction | null; feintMs: number; source: 'local' | 'remote'; pre: Defense | null } | null = null;
+  /** En ligne : esquive reçue de l'adversaire pour la gifle en cours. */
+  private remoteDef: Defense | null = null;
+  private awaitToken = 0;
+  private downPos: { x: number; y: number } | null = null;
+  private lift: { dx: number; dy: number } | null = null;
+  /** Teinte imposée (esquive, droit de réponse) : l'aura de rage ne la remplace pas. */
+  private tintLock: Record<Side, boolean> = { left: false, right: false };
 
   constructor() {
     super('Fight');
@@ -152,6 +202,17 @@ export class FightScene extends Phaser.Scene {
     this.aiTimers = [];
     this.frozen = false;
     this.slowToken = 0;
+    this.defGesture = null;
+    this.defPointers = new Set();
+    this.defMove = null;
+    this.defAt = null;
+    this.travelMs = 0;
+    this.defHints = { left: 0, right: 0 };
+    this.specialOn = false;
+    this.combo = null;
+    this.pending = null;
+    this.remoteDef = null;
+    this.tintLock = { left: false, right: false };
   }
 
   create() {
@@ -181,6 +242,7 @@ export class FightScene extends Phaser.Scene {
         color: CSS.ink,
         backgroundColor: CSS.cream,
         padding: { x: 14, y: 6 },
+        align: 'center',
       })
       .setOrigin(0.5, 1)
       .setDepth(100)
@@ -221,7 +283,7 @@ export class FightScene extends Phaser.Scene {
       showNetLost(false);
       if (this.online) {
         const noop = () => {};
-        this.online.onPress = this.online.onCancel = this.online.onRestart = noop;
+        this.online.onPress = this.online.onCancel = this.online.onRestart = this.online.onStage = noop;
         this.online.onStatus = noop;
       }
     });
@@ -230,6 +292,7 @@ export class FightScene extends Phaser.Scene {
       const o = this.online;
       o.onPress = () => this.remotePress(true);
       o.onCancel = () => this.remotePress(false);
+      o.onStage = (s) => this.remoteStage(s);
       o.onStatus = () => this.netStatus();
       // Revanche lancée en face, ou état distant à adopter : on repart du journal.
       o.onRestart = () => this.scene.restart({ online: o, bot: this.bot, speed: this.speed });
@@ -242,6 +305,8 @@ export class FightScene extends Phaser.Scene {
       sfx.startMusic();
     });
     if (this.mode !== 'autoplay') {
+      // Deux joueurs sur le même écran : celui qui gifle et celui qui esquive ont chacun leur doigt.
+      this.input.addPointer(2);
       this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onDown, this);
       this.input.on(Phaser.Input.Events.POINTER_MOVE, this.onMove, this);
       this.input.on(Phaser.Input.Events.POINTER_UP, this.onUp, this);
@@ -280,49 +345,92 @@ export class FightScene extends Phaser.Scene {
     if (this.control[side] !== 'remote') return;
     // Appui reçu pendant notre bandeau : on le montrera dès que le tour commence.
     this.pendingPress = down && this.phase === 'banner';
+    // L'adversaire rejoue son tour (il a rechargé sa page pendant sa gifle) : on repart de zéro.
+    if (down && (this.phase === 'await' || this.phase === 'travel') && this.pending?.source === 'remote') this.abortPending();
     if (down && this.phase === 'ready') {
-      const id = this.f[side].id;
-      this.setPhase('charging');
-      this.gauge.setZone(FIGHTERS[id].goldenZone);
-      this.gauge.setValue(0);
-      this.gauge.show(true);
-      this.setPose(side, 'windup');
+      const g = this.gaugeSetup(side);
+      this.showCharging(side);
       const tw = { t: 0 };
       this.remoteGauge = this.tweens.add({
         targets: tw,
-        t: FIGHTERS[id].chargeTimeMs,
-        duration: FIGHTERS[id].chargeTimeMs,
-        onUpdate: () => this.gauge.setValue(chargeAt(tw.t, FIGHTERS[id].chargeTimeMs)),
+        t: g.time / g.factor,
+        duration: g.time / g.factor,
+        onUpdate: () => this.gauge.setValue(chargeAt(tw.t, g.time, g.factor)),
       });
-    } else if (!down && this.phase === 'charging') {
+    } else if (!down && (this.phase === 'charging' || this.phase === 'armed')) {
       this.stopRemoteGauge();
       this.gauge.show(false);
+      this.f[side].sprite.x = this.f[side].homeX;
       this.setPose(side, 'idle');
       this.setPhase('ready');
     }
   }
 
+  /** Une gifle de l'adversaire était en route mais n'aboutira pas : retour à l'attente. */
+  private abortPending() {
+    this.pending = null;
+    this.awaitToken++;
+    const att = this.f[this.attacker];
+    this.tweens.killTweensOf(att.sprite);
+    att.sprite.x = att.homeX;
+    this.setPose(this.attacker, 'idle');
+    this.setPhase('ready');
+  }
+
+  /** Étapes du tour de l'adversaire (ou son esquive pendant le nôtre). */
+  private remoteStage(s: Stage) {
+    const side = this.attacker;
+    if (s.k === 'defense') {
+      if (this.control[side] === 'remote') return;
+      this.remoteDef = { defense: s.defense, rageGuard: s.rageGuard };
+      if (this.phase === 'await' && this.pending?.source === 'local') this.finalize(this.remoteDef);
+      return;
+    }
+    if (this.control[side] !== 'remote') return;
+    const p = this.phase;
+    if (s.k === 'special') {
+      if (p === 'ready' || p === 'charging') this.activateSpecial(side);
+    } else if (s.k === 'armed') {
+      if (p === 'charging') {
+        this.stopRemoteGauge();
+        this.showArmed(side);
+      }
+    } else if (s.k === 'spin') {
+      if (p === 'charging' || p === 'armed' || p === 'combo') this.showSpin(side, s.count);
+    } else if (p === 'ready' || p === 'charging' || p === 'armed' || p === 'combo') {
+      this.stopRemoteGauge();
+      this.launch(null, s.feintMs, 'remote');
+    }
+  }
+
   /**
-   * Joue l'action reçue de l'adversaire. S'il n'a pas été vu en train d'armer (son action est
-   * arrivée pendant notre bandeau, par exemple), on montre d'abord un armement express.
+   * Joue l'action reçue de l'adversaire. Si sa gifle est déjà arrivée à l'écran (on a vu son
+   * départ), il ne reste que l'impact. Sinon (action arrivée pendant notre bandeau, reprise…),
+   * on montre un armement express puis la gifle complète.
    */
   private playRemote(action: TurnAction) {
     const side = this.attacker;
-    const id = this.f[side].id;
-    const seenCharging = this.phase === 'charging';
     this.stopRemoteGauge();
+    if (this.pending?.source === 'remote' && this.phase === 'await' && action.type === 'slap') {
+      this.pending = null;
+      return this.act(action, { fromRemote: true, arrived: true });
+    }
+    const seenCharging = this.phase === 'charging' || this.phase === 'armed' || this.phase === 'combo';
+    this.pending = null;
+    this.tweens.killTweensOf(this.f[side].sprite);
     this.setPhase('busy');
     this.f[side].sprite.x = this.f[side].homeX;
     const finish = () => {
       if (action.type === 'slap') this.gauge.setValue(action.charge);
       else if (action.type === 'selfslap') this.gauge.setValue(100, true);
       this.time.delayedCall(300, () => this.gauge.show(false));
-      this.act(action, true);
+      this.act(action, { fromRemote: true });
     };
-    if (action.type === 'timeout') return this.act(action, true);
+    if (action.type === 'timeout') return this.act(action, { fromRemote: true });
     if (seenCharging) return finish();
     const target = action.type === 'slap' ? action.charge : 100;
-    this.gauge.setZone(FIGHTERS[id].goldenZone);
+    this.specialOn = action.type === 'slap' && !!action.special && !!this.match?.specialReady[side];
+    this.gauge.setZone(this.gaugeSetup(side).zone);
     this.gauge.setValue(0);
     this.gauge.show(true);
     this.setPose(side, 'windup');
@@ -446,6 +554,13 @@ export class FightScene extends Phaser.Scene {
       specialReady: m ? { ...m.specialReady } : { left: false, right: false },
       stunned: m ? { ...m.stunned } : { left: false, right: false },
       dizzy: { left: !!this.f.left.dizzy, right: !!this.f.right.dizzy },
+      special: this.specialOn,
+      combo: this.combo?.hits.length ?? 0,
+      defMove: this.defMove ? this.defMove.kind : null,
+      travelMs: this.phase === 'travel' ? this.travelMs : null,
+      lastWord: m?.lastWord ?? null,
+      opener: m?.opener ?? null,
+      hint: this.hint?.visible ? this.hint.text : '',
     };
     (window.__slap as Record<string, unknown>).fx = {
       ...this.fx.stats,
@@ -520,6 +635,7 @@ export class FightScene extends Phaser.Scene {
       this.f[s].sprite.x = this.f[s].homeX;
       this.clearPrints(s);
       this.clearDizzy(s);
+      this.setTint(s, null);
       this.f[s].bar.setRage(m.rage[s] / ADVANCED.rageMax);
       this.setPose(s, 'idle');
     }
@@ -544,6 +660,14 @@ export class FightScene extends Phaser.Scene {
     this.turnElapsed = 0;
     this.lastTickSecond = -1;
     this.gesture = null;
+    this.specialOn = false;
+    this.combo = null;
+    this.pending = null;
+    this.remoteDef = null;
+    this.defGesture = null;
+    this.defMove = null;
+    this.defAt = null;
+    this.defPointers.clear();
     this.timer.set(null);
     if (this.mode === 'training') {
       this.setPhase('ready');
@@ -556,26 +680,61 @@ export class FightScene extends Phaser.Scene {
     this.time.delayedCall(d - 120, () => {
       if (this.phase !== 'banner') return;
       this.turnElapsed = 0;
+      // Celui qui reçoit peut esquiver dès maintenant : un seul essai par gifle.
+      const def = other(side);
+      if (this.match && this.control[def] === 'human') this.defGesture = new DefenseGesture(def === 'left' ? -1 : 1);
       this.setPhase('ready');
-      this.showHint();
+      this.showHint(true);
       if (this.control[side] === 'ai') this.aiTurn(side);
       if (this.control[side] === 'remote' && this.pendingPress) this.remotePress(true);
       this.pendingPress = false;
     });
   }
 
-  private showHint() {
-    const human = this.control[this.attacker] === 'human';
-    const show = human && (this.mode === 'training' || (this.mode === 'match' && this.turnsPlayed < 2) || (this.mode === 'solo' && this.turnsPlayed < 3));
-    if (!show) return this.hint.setVisible(false);
-    const def = FIGHTERS[this.f[other(this.attacker)].id].short.toUpperCase();
-    const arrow = this.attacker === 'left' ? '→' : '←';
-    this.hint.setText(`MAINTIENS pour armer  ·  GLISSE vers ${def} ${arrow}`).setVisible(true);
+  /** Aide en bas de l'écran. `fresh` : début du tour (compte les fois où l'aide « esquive » est montrée). */
+  private showHint(fresh = false) {
+    const att = this.attacker;
+    const def = other(att);
+    const m = this.match;
+    const lines: string[] = [];
+    const two = this.control[att] === 'human' && this.control[def] === 'human' && !!m;
+    const who = (s: Side) => (two ? `${FIGHTERS[this.f[s].id].short.toUpperCase()} : ` : '');
+    if (this.control[att] === 'human') {
+      const sp = FIGHTERS[this.f[att].id].special;
+      const name = sp.name.toUpperCase();
+      if (this.specialOn) {
+        lines.push(sp.hits > 1 ? `${name} : GIFLE, puis RE-GLISSE ${sp.hits - 1} fois en rythme !` : `${name} : jauge lente, zone dorée étroite… vise bien !`);
+      } else {
+        const limit = this.mode === 'solo' ? 3 : 2;
+        if (this.mode === 'training' || this.turnsPlayed < limit) {
+          const arrow = att === 'left' ? '→' : '←';
+          lines.push(`${who(att)}MAINTIENS pour armer  ·  GLISSE vers ${FIGHTERS[this.f[def].id].short.toUpperCase()} ${arrow}`);
+        }
+        if (m?.specialReady[att]) lines.push(`${who(att)}RAGE PLEINE ! GLISSE VERS LE HAUT ↑ pour ${name}`);
+      }
+    }
+    if (m && this.control[def] === 'human') {
+      const back = def === 'left' ? '←' : '→';
+      if (fresh) this.defHints[def]++;
+      if (this.defHints[def] <= 3) lines.push(`${who(def)}ESQUIVE : glisse vers l'arrière ${back} juste avant l'impact`);
+      if (m.specialReady[def]) lines.push(`${who(def)}RAGE PLEINE : glisse vers le bas ↓ = garde parfaite`);
+    }
+    if (lines.length === 0) {
+      this.hint.setVisible(false);
+      this.publish();
+      return;
+    }
+    this.hint.setFontSize(lines.length > 2 ? 17 : 20).setText(lines.join('\n')).setVisible(true);
+    this.publish();
   }
 
   update(time: number, delta: number) {
     if (!this.frozen) this.crowd.update(time);
-    if (this.online && this.match && this.control[this.attacker] === 'remote' && (this.phase === 'ready' || this.phase === 'charging')) {
+    // Avancée de la gifle en route, au rythme des animations.
+    if (this.phase === 'travel') this.travelMs += delta * this.tweens.timeScale;
+    this.lastFrameAt = performance.now();
+    const p = this.phase;
+    if (this.online && this.match && this.control[this.attacker] === 'remote' && (p === 'ready' || p === 'charging' || p === 'armed' || p === 'combo' || p === 'await')) {
       // L'adversaire a joué : son action est arrivée par le réseau.
       const action = this.online.takeRemote(this.match.totalTurns);
       if (action) {
@@ -618,6 +777,11 @@ export class FightScene extends Phaser.Scene {
       const att = this.f[this.attacker];
       att.sprite.x = att.homeX + (c >= 100 ? Phaser.Math.Between(-3, 3) : 0);
     }
+    // Gifle retenue (feinte) : elle part toute seule au bout d'un moment.
+    if (this.phase === 'armed' && this.gesture) {
+      this.liftAt = performance.now();
+      this.resolve(this.gesture.update(this.liftAt));
+    }
   }
 
   private timeout() {
@@ -641,48 +805,104 @@ export class FightScene extends Phaser.Scene {
     return typeof ts === 'number' && ts > 0 ? ts : performance.now();
   }
 
+  /**
+   * À qui est ce doigt ? À deux sur le même écran, chacun joue sur sa moitié ;
+   * sinon l'unique joueur gifle à son tour et esquive au tour de l'autre.
+   */
+  private roleOf(p: Phaser.Input.Pointer): 'attack' | 'defend' | null {
+    const att = this.attacker;
+    const a = this.control[att] === 'human';
+    const d = this.control[other(att)] === 'human' && !!this.match;
+    if (a && d) return (p.x < this.scale.width / 2 ? 'left' : 'right') === att ? 'attack' : 'defend';
+    return a ? 'attack' : d ? 'defend' : null;
+  }
+
   private onDown(p: Phaser.Input.Pointer) {
-    if (this.phase !== 'ready' || this.control[this.attacker] !== 'human') return;
     if (this.soundBtn.getBounds().contains(p.x, p.y) || this.homeBtn.getBounds().contains(p.x, p.y)) return;
+    const role = this.roleOf(p);
+    const { x, y } = this.css(p);
+    const t = this.now(p);
+    const ph = this.phase;
+    if (role === 'defend') {
+      if (this.defGesture && (ph === 'ready' || ph === 'charging' || ph === 'armed' || ph === 'combo' || ph === 'travel')) {
+        this.defGesture.down(p.id, t, x, y);
+        this.defPointers.add(p.id);
+      }
+      return;
+    }
+    if (role !== 'attack') return;
+    if (ph === 'combo' && this.combo) {
+      this.combo.start = { id: p.id, t, x, y };
+      return;
+    }
+    if (ph !== 'ready') return;
     this.online?.sendPress();
     const att = this.f[this.attacker];
-    this.gesture = new SlapGesture(att.id, this.attacker === 'left' ? 1 : -1, this.chargeSpeed(this.attacker));
+    const g = this.gaugeSetup(this.attacker);
+    this.gesture = new SlapGesture(att.id, this.attacker === 'left' ? 1 : -1, scaleSpeed(this.chargeSpeed(this.attacker), g.factor));
     this.overheatSeen = false;
-    const { x, y } = this.css(p);
-    this.gesture.down(this.now(p), x, y);
+    this.gesture.down(t, x, y);
     this.pointerId = p.id;
-    this.setPhase('charging');
-    this.gauge.setZone(FIGHTERS[att.id].goldenZone);
-    this.gauge.setValue(0);
-    this.gauge.show(true);
-    this.setPose(this.attacker, 'windup');
-    this.hint.setVisible(false);
+    this.downPos = { x, y };
+    this.lift = null;
+    this.showCharging(this.attacker);
   }
 
   private onMove(p: Phaser.Input.Pointer) {
-    if (this.phase !== 'charging' || !this.gesture || p.id !== this.pointerId || !p.isDown) return;
     const { x, y } = this.css(p);
-    this.resolve(this.gesture.move(this.now(p), x, y));
+    const t = this.now(p);
+    if (this.defPointers.has(p.id)) return this.defenseTrack(this.defGesture?.track(p.id, t, x, y) ?? null);
+    if (this.phase === 'combo') return this.comboMove(p.id, t, x, y);
+    if ((this.phase !== 'charging' && this.phase !== 'armed') || !this.gesture || p.id !== this.pointerId || !p.isDown) return;
+    const out = this.gesture.move(t, x, y);
+    if (out) return this.resolve(out);
+    // Le swipe est fait, le doigt reste posé : la gifle est retenue (feinte).
+    if (this.gesture.armed && this.phase === 'charging') {
+      this.online?.sendStage({ k: 'armed' });
+      this.showArmed(this.attacker);
+    }
   }
 
   private onUp(p: Phaser.Input.Pointer) {
-    if (this.phase !== 'charging' || !this.gesture || p.id !== this.pointerId) return;
     const { x, y } = this.css(p);
-    this.resolve(this.gesture.up(this.now(p), x, y));
+    const t = this.now(p);
+    if (this.defPointers.has(p.id)) {
+      this.defenseTrack(this.defGesture?.up(p.id, t, x, y) ?? null);
+      this.defPointers.delete(p.id);
+      return;
+    }
+    if (this.phase === 'combo') {
+      this.comboMove(p.id, t, x, y);
+      if (this.combo?.start?.id === p.id) this.combo.start = null;
+      return;
+    }
+    if ((this.phase !== 'charging' && this.phase !== 'armed') || !this.gesture || p.id !== this.pointerId) return;
+    this.lift = this.downPos ? { dx: x - this.downPos.x, dy: y - this.downPos.y } : null;
+    this.liftAt = t;
+    this.resolve(this.gesture.up(t, x, y));
   }
 
   private resolve(out: GestureOutcome | null) {
     if (!out) return;
-    const att = this.f[this.attacker];
+    const side = this.attacker;
+    const att = this.f[side];
     att.sprite.x = att.homeX;
     if (out.type === 'cancel') {
       this.online?.sendCancel();
       this.gesture = null;
       this.gauge.show(false);
-      this.setPose(this.attacker, 'idle');
+      this.setPose(side, 'idle');
       this.setPhase('ready');
+      // Swipe vers le haut avec la rage pleine : la spéciale est déclenchée.
+      const l = this.lift;
+      this.lift = null;
+      if (out.reason !== 'no-swipe' && l && l.dy <= -50 && Math.abs(l.dy) > Math.abs(l.dx) && this.match?.specialReady[side] && !this.specialOn) {
+        this.online?.sendStage({ k: 'special' });
+        this.activateSpecial(side);
+        return;
+      }
       this.showHint();
-      if (out.reason !== 'no-swipe') announceImage(this, `ann_harder_${this.f[other(this.attacker)].id}`, 500, 0.5);
+      if (out.reason !== 'no-swipe') announceImage(this, `ann_harder_${this.f[other(side)].id}`, 500, 0.5);
       return;
     }
     this.gesture = null;
@@ -690,30 +910,246 @@ export class FightScene extends Phaser.Scene {
       this.gauge.setValue(100, true);
       this.time.delayedCall(250, () => this.gauge.show(false));
       this.act({ type: 'selfslap' });
-    } else {
-      this.gauge.setValue(out.charge);
-      this.time.delayedCall(350, () => this.gauge.show(false));
-      this.act({ type: 'slap', charge: out.charge, speed: out.speed, angle: out.angle });
+      return;
     }
+    this.gauge.setValue(out.charge);
+    const base: SlapAction = { type: 'slap', charge: out.charge, speed: out.speed, angle: out.angle };
+    if (this.specialOn && this.match?.specialReady[side]) {
+      base.special = { hits: [{ speed: out.speed, angle: out.angle }] };
+      // La Toupie : les gifles suivantes se placent en rythme avant que tout parte.
+      if (FIGHTERS[att.id].special.hits > 1) return this.startCombo(base, out.heldMs);
+    }
+    this.launch(base, out.heldMs, 'local');
+  }
+
+  // ── Spéciales, feinte, esquive ─────────────────────────────────────────
+
+  /** Jauge du tour : celle de la spéciale (plus lente, zone plus étroite) si elle est déclenchée. */
+  private gaugeSetup(side: Side) {
+    const f = FIGHTERS[this.f[side].id];
+    const sp = this.specialOn ? f.special : null;
+    return { zone: sp?.goldenZone ?? f.goldenZone, factor: sp?.chargeSpeed ?? 1, time: f.chargeTimeMs };
+  }
+
+  private showCharging(side: Side) {
+    this.gauge.setZone(this.gaugeSetup(side).zone);
+    this.gauge.setValue(0);
+    this.gauge.show(true);
+    this.hint.setVisible(false);
+    this.setPose(side, 'windup');
+    this.setPhase('charging');
+  }
+
+  /** La gifle est prête et retenue : le perso se penche en arrière, le chrono s'arrête. */
+  private showArmed(side: Side) {
+    const f = this.f[side];
+    const dir = side === 'left' ? 1 : -1;
+    this.tweens.add({ targets: f.sprite, x: f.homeX - dir * 14, duration: 70, ease: 'Quad.Out' });
+    this.setPhase('armed');
+  }
+
+  /** La spéciale est déclenchée (swipe vers le haut, rage pleine) : annonce, puis le tour repart. */
+  private activateSpecial(side: Side) {
+    this.specialOn = true;
+    sfx.powerUp();
+    this.fx.screenFlash(0.35, COLORS.pink);
+    this.cameras.main.shake(200, 0.004);
+    announceImage(this, `ann_special_${this.f[side].id}`, 420, 0.3);
+    this.turnElapsed = 0;
+    this.showHint();
+  }
+
+  /** La Toupie : première gifle placée, on attend les suivantes (en rythme). */
+  private startCombo(base: SlapAction, feintMs: number) {
+    this.combo = { base, hits: base.special!.hits, lastAt: this.liftAt, feintMs, timer: null, start: null };
+    this.setPhase('combo');
+    this.comboArm();
+  }
+
+  private comboArm() {
+    const c = this.combo!;
+    c.timer?.remove(false);
+    c.timer = this.time.delayedCall(COMBO.maxGapMs, () => this.endCombo());
+  }
+
+  /** Un nouveau swipe vers l'adversaire pendant La Toupie. */
+  private comboMove(id: number, t: number, x: number, y: number) {
+    const c = this.combo;
+    if (!c?.start || c.start.id !== id) return;
+    const dir = this.attacker === 'left' ? 1 : -1;
+    const dx = (x - c.start.x) * dir;
+    const dy = y - c.start.y;
+    if (dx < SLAP.minSwipePx) return;
+    const dur = Math.max(1, t - c.start.t);
+    c.start = null;
+    // Trop vite : le rythme est cassé, la Toupie part avec ce qu'elle a.
+    if ((t - c.lastAt) * this.speed < COMBO.minGapMs) return this.endCombo();
+    c.hits.push({ speed: Math.hypot(dx, dy) / dur, angle: swipeAngle(dx, dy) });
+    c.lastAt = t;
+    this.online?.sendStage({ k: 'spin', count: c.hits.length });
+    this.showSpin(this.attacker, c.hits.length);
+    if (c.hits.length >= FIGHTERS[this.f[this.attacker].id].special.hits) this.endCombo();
+    else this.comboArm();
+  }
+
+  private endCombo() {
+    const c = this.combo;
+    if (!c) return;
+    c.timer?.remove(false);
+    this.combo = null;
+    this.launch(c.base, c.feintMs, 'local');
+  }
+
+  /** La Toupie : le perso fait un tour sur lui-même, le compteur monte. */
+  private showSpin(side: Side, count: number) {
+    const f = this.f[side];
+    const s = this.layout[side].scale;
+    sfx.whoosh();
+    this.tweens.add({ targets: f.sprite, scaleX: s * 0.15, duration: 70, yoyo: true, ease: 'Sine.InOut', onComplete: () => f.sprite.setScale(this.layout[side].scale) });
+    if (count >= 2 && count <= 3) {
+      const img = this.add.image(f.homeX, this.layout[side].top + 40, `lbl_x${count}`).setDepth(75).setAngle(-8).setScale(0.3);
+      this.tweens.add({ targets: img, scale: 1, duration: 140, ease: 'Back.Out' });
+      this.tweens.add({ targets: img, alpha: 0, y: img.y - 40, delay: 420, duration: 200, onComplete: () => img.destroy() });
+    }
+    this.publish();
+  }
+
+  /** Teinte imposée à un perso (null : on la retire). */
+  private setTint(side: Side, color: number | null) {
+    const f = this.f[side];
+    this.tintLock[side] = color !== null;
+    if (color !== null) f.sprite.setTint(color);
+    else if (!f.readyTag) f.sprite.clearTint();
+  }
+
+  /** Recul d'esquive (en attendant une vraie pose) : le perso part en arrière puis revient. */
+  private lean(side: Side) {
+    const f = this.f[side];
+    const back = side === 'left' ? -1 : 1;
+    this.tweens.killTweensOf(f.sprite);
+    this.tweens.add({ targets: f.sprite, x: f.homeX + back * 34, duration: 80, ease: 'Quad.Out', yoyo: true, hold: 260 });
+  }
+
+  /** Le joueur qui reçoit a fait son geste : esquive (arrière) ou garde de rage (bas). */
+  private defenseTrack(m: DefenseMove | null) {
+    if (!m) return;
+    this.defMove = m;
+    // Où en est la gifle ? (dernière image, plus le temps écoulé depuis, borné à une image.)
+    this.defAt = this.phase === 'travel' ? this.travelMs + Math.min(20, Math.max(0, performance.now() - this.lastFrameAt)) * this.tweens.timeScale : -1e9;
+    const def = other(this.attacker);
+    if (m.kind === 'dodge') {
+      this.lean(def);
+      sfx.whoosh();
+    } else if (this.match?.specialReady[def]) {
+      this.fx.screenFlash(0.2, COLORS.pink);
+      sfx.powerUp();
+    }
+    this.publish();
+  }
+
+  /** Défense de celui qui reçoit, jugée à l'instant de l'impact. */
+  private localDefense(feintMs: number): Defense {
+    const def = other(this.attacker);
+    const m = this.match;
+    if (!m) return {};
+    if (this.control[def] === 'ai') return aiDefend(this.rng, this.aiProfile[def], feintMs, m.specialReady[def]);
+    const mv = this.defMove;
+    if (!mv) return {};
+    if (mv.kind === 'guard') return m.specialReady[def] ? { rageGuard: true } : {};
+    const q = judgeDefense(this.defAt, DEFENSE.travelMs);
+    return q ? { defense: q } : {};
+  }
+
+  /**
+   * La gifle part : le perso s'élance, et celui qui reçoit a `DEFENSE.travelMs` pour esquiver.
+   * `action` est inconnue quand la gifle vient de l'adversaire en ligne (elle arrivera validée).
+   */
+  private launch(action: SlapAction | null, feintMs: number, source: 'local' | 'remote') {
+    const attSide = this.attacker;
+    const defSide = other(attSide);
+    const att = this.f[attSide];
+    if (source === 'local') this.online?.sendStage({ k: 'attack', feintMs });
+    this.cancelAi();
+    this.gesture = null;
+    this.hint.setVisible(false);
+    this.timer.set(null);
+    this.time.delayedCall(250, () => this.gauge.show(false));
+    // L'IA décide de son esquive au départ de la gifle (on la voit reculer juste avant l'impact).
+    const pre = this.control[defSide] === 'ai' ? this.localDefense(feintMs) : null;
+    this.pending = { action, feintMs, source, pre };
+    this.travelMs = 0;
+    this.setPhase('travel');
+    const k = computeStrike(this.layout, attSide, att.id, this.f[defSide].id);
+    att.sprite.setDepth(11);
+    this.f[defSide].sprite.setDepth(10);
+    this.setPose(attSide, 'swing');
+    sfx.whoosh();
+    const T = DEFENSE.travelMs;
+    this.time.delayedCall(T - 70, () => {
+      if (this.phase === 'travel') this.setPose(attSide, 'slap');
+    });
+    if (pre && (pre.defense || pre.rageGuard)) this.time.delayedCall(T - (pre.defense === 'good' ? 140 : 60), () => this.lean(defSide));
+    this.tweens.killTweensOf(att.sprite);
+    this.tweens.add({ targets: att.sprite, x: att.homeX + k.dir * k.step, duration: T, ease: 'Quad.In', onComplete: () => this.arrive() });
+  }
+
+  /** La main arrive sur la joue : on juge l'esquive, puis le tour se résout. */
+  private arrive() {
+    const p = this.pending;
+    if (!p || this.phase !== 'travel') return;
+    const d = p.pre ?? this.localDefense(p.feintMs);
+    if (p.source === 'remote') {
+      // En ligne, gifle de l'adversaire : on lui envoie notre esquive, il valide l'action.
+      this.online?.sendStage({ k: 'defense', ...d });
+      this.setPhase('await');
+      return;
+    }
+    if (this.online && this.control[other(this.attacker)] === 'remote') {
+      // En ligne, notre gifle : l'esquive se juge sur le téléphone d'en face.
+      if (this.remoteDef) return this.finalize(this.remoteDef);
+      if (!this.online.connected) return this.finalize({});
+      this.setPhase('await');
+      const token = ++this.awaitToken;
+      window.setTimeout(() => {
+        if (token === this.awaitToken && this.sys.isActive() && this.phase === 'await' && this.pending === p) this.finalize({});
+      }, DEFENSE_WAIT_MS / this.speed);
+      return;
+    }
+    this.finalize(d);
+  }
+
+  private finalize(d: Defense) {
+    const p = this.pending;
+    if (!p?.action) return;
+    this.pending = null;
+    this.awaitToken++;
+    const action: SlapAction = { ...p.action };
+    if (d.defense) action.defense = d.defense;
+    if (d.rageGuard) action.rageGuard = true;
+    this.act(action, { arrived: true });
   }
 
   // ── IA (mode solo et démo) ─────────────────────────────────────────────
 
   private aiTurn(side: Side) {
     const id = this.f[side].id;
+    const useSpecial = !!this.match?.specialReady[side];
     const speed = this.chargeSpeed(side);
-    const d = aiDecide(this.rng, id, this.aiProfile[side], speed);
+    const d = aiDecide(this.rng, id, this.aiProfile[side], speed, useSpecial);
     if (d.action.type === 'timeout') return; // l'IA hésite : le chrono tranchera
     const target = d.action.type === 'slap' ? d.action.charge : 100;
     const action = d.action;
     this.aiTimers.push(
       this.time.delayedCall(d.startDelayMs, () => {
         if (this.phase !== 'ready') return;
-        this.setPhase('charging');
-        this.gauge.setZone(FIGHTERS[id].goldenZone);
-        this.gauge.setValue(0);
-        this.gauge.show(true);
-        this.setPose(side, 'windup');
+        if (useSpecial) {
+          this.online?.sendStage({ k: 'special' });
+          this.activateSpecial(side);
+        }
+        this.online?.sendPress();
+        const g = this.gaugeSetup(side);
+        const speedNow = scaleSpeed(speed, g.factor);
+        this.showCharging(side);
         const holdMs = d.holdMs;
         const tw = { t: 0 };
         // La jauge de l'IA suit la même courbe que celle d'un joueur (irrégulière si sonnée).
@@ -721,14 +1157,35 @@ export class FightScene extends Phaser.Scene {
           targets: tw,
           t: holdMs,
           duration: holdMs,
-          onUpdate: () => this.gauge.setValue(Math.min(target, chargeAt(tw.t, FIGHTERS[id].chargeTimeMs, speed))),
+          onUpdate: () => this.gauge.setValue(Math.min(target, chargeAt(tw.t, g.time, speedNow))),
         });
         this.aiTimers.push(
           this.time.delayedCall(holdMs + (action.type === 'slap' ? d.swipeMs : 0), () => {
             if (this.phase !== 'charging') return;
             this.gauge.setValue(target, action.type === 'selfslap');
-            this.time.delayedCall(300, () => this.gauge.show(false));
-            this.act(action);
+            if (action.type !== 'slap') {
+              this.time.delayedCall(300, () => this.gauge.show(false));
+              return this.act(action);
+            }
+            // Swipe fait : la gifle est retenue un instant (feinte), La Toupie place ses gifles.
+            this.online?.sendStage({ k: 'armed' });
+            this.showArmed(side);
+            const hits = action.special?.hits.length ?? 1;
+            let wait = 0;
+            for (let i = 2; i <= hits; i++) {
+              wait += 330;
+              this.aiTimers.push(
+                this.time.delayedCall(wait, () => {
+                  this.online?.sendStage({ k: 'spin', count: i });
+                  this.showSpin(side, i);
+                }),
+              );
+            }
+            this.aiTimers.push(
+              this.time.delayedCall(wait + d.feintMs, () => {
+                if (this.phase === 'armed') this.launch(action, d.feintMs, 'local');
+              }),
+            );
           }),
         );
       }),
@@ -742,9 +1199,9 @@ export class FightScene extends Phaser.Scene {
 
   // ── Résolution d'un tour ───────────────────────────────────────────────
 
-  private act(action: TurnAction, fromRemote = false) {
+  private act(action: TurnAction, o: { fromRemote?: boolean; arrived?: boolean } = {}) {
     // En ligne : notre action part chez l'adversaire (et dans le journal).
-    if (this.online && this.match && !fromRemote) this.online.sendAction(this.match.totalTurns, action);
+    if (this.online && this.match && !o.fromRemote) this.online.sendAction(this.match.totalTurns, action);
     this.cancelAi();
     this.setPhase('busy');
     this.hint.setVisible(false);
@@ -753,14 +1210,14 @@ export class FightScene extends Phaser.Scene {
     // Le perso a joué son tour : s'il était sonné, ses étoiles s'envolent.
     this.clearDizzy(this.attacker);
     const events = this.match ? this.match.play(action) : this.trainingPlay(action);
-    const hit = events.find((e): e is Extract<MatchEvent, { type: 'hit' }> => e.type === 'hit');
+    const hit = events.find((e): e is HitEvent => e.type === 'hit');
     const self = events.find((e): e is Extract<MatchEvent, { type: 'selfhit' }> => e.type === 'selfhit');
     const after = () => {
       this.afterHitStatus(events);
       this.afterTurn(events);
     };
-    if (hit?.kind === 'special') this.specialAnim(hit, after);
-    else if (hit) this.slapAnim(hit, after);
+    if (hit?.kind === 'special') this.specialAnim(hit, after, !!o.arrived);
+    else if (hit) this.slapAnim(hit, after, !!o.arrived);
     else if (self) this.selfSlapAnim(self, after);
     else after();
   }
@@ -802,7 +1259,7 @@ export class FightScene extends Phaser.Scene {
         f.readyTag.destroy();
         f.readyTag = null;
         this.tweens.killTweensOf(f.sprite);
-        f.sprite.clearTint();
+        if (!this.tintLock[side]) f.sprite.clearTint();
       }
       return;
     }
@@ -826,7 +1283,7 @@ export class FightScene extends Phaser.Scene {
           100,
           k * 100,
         );
-        f.sprite.setTint(Phaser.Display.Color.GetColor(c.r, c.g, c.b));
+        if (!this.tintLock[side]) f.sprite.setTint(Phaser.Display.Color.GetColor(c.r, c.g, c.b));
       },
     });
     this.publish();
@@ -896,14 +1353,25 @@ export class FightScene extends Phaser.Scene {
   private afterTurn(events: MatchEvent[]) {
     const ko = events.find((e): e is Extract<MatchEvent, { type: 'ko' }> => e.type === 'ko');
     const next = events.find((e): e is Extract<MatchEvent, { type: 'turn' }> => e.type === 'turn');
+    const reply = events.find((e): e is Extract<MatchEvent, { type: 'lastWord' }> => e.type === 'lastWord');
     if (ko) this.knockout(ko.loser, events);
-    else if (next) this.beginTurn(next.side);
+    else if (reply && next) {
+      // Droit de réponse : à 0 PV, celui qui n'a pas ouvert la manche rend une dernière gifle.
+      this.fx.clearTransient();
+      this.fx.screenFlash(0.35, COLORS.cyan);
+      sfx.whistle();
+      this.setPose(reply.side, 'idle');
+      this.setTint(reply.side, 0xff9f9f);
+      this.say('lastWord');
+      const d = announceImage(this, 'ann_lastword', 800, 0.2);
+      this.time.delayedCall(d - 100, () => this.beginTurn(next.side));
+    } else if (next) this.beginTurn(next.side);
   }
 
   // ── Animations ─────────────────────────────────────────────────────────
 
   /** windup → swing (60 ms) → slap avec pas en avant → contact (arrêt sur image) → hit → retour. */
-  private slapAnim(hit: Extract<MatchEvent, { type: 'hit' }>, done: () => void) {
+  private slapAnim(hit: HitEvent, done: () => void, arrived = false) {
     const attSide = hit.attacker;
     const defSide = hit.defender;
     const att = this.f[attSide];
@@ -912,6 +1380,11 @@ export class FightScene extends Phaser.Scene {
     const k = computeStrike(this.layout, attSide, att.id, def.id);
     att.sprite.setDepth(11);
     def.sprite.setDepth(10);
+    // La gifle a déjà fait le trajet (le temps de l'esquive) : il ne reste que le contact.
+    if (arrived && !limp) {
+      this.setPose(attSide, 'slap');
+      return this.impact(hit, k, done);
+    }
 
     this.setPose(attSide, 'swing');
     if (!limp) sfx.whoosh();
@@ -928,10 +1401,10 @@ export class FightScene extends Phaser.Scene {
   }
 
   private impact(
-    hit: Extract<MatchEvent, { type: 'hit' }>,
+    hit: HitEvent,
     k: ReturnType<typeof computeStrike>,
     done: () => void,
-    opts: { hpAfter?: number; whole?: Extract<MatchEvent, { type: 'hit' }> } = {},
+    opts: { hpAfter?: number; whole?: HitEvent } = {},
   ) {
     const attSide = hit.attacker;
     const defSide = hit.defender;
@@ -944,6 +1417,7 @@ export class FightScene extends Phaser.Scene {
     const crit = !!result?.critical || special;
     const contact = limp ? 'limp' : special ? 'clean' : result!.contact;
     const whole = opts.whole ?? hit;
+    const dodge = whole.defense ?? null;
     // Puissance perçue 0–1 : sert à doser tous les effets.
     const power = special ? 1 : Math.min(1, hit.damage / 34);
     const dir = k.dir as 1 | -1;
@@ -952,7 +1426,7 @@ export class FightScene extends Phaser.Scene {
     if (opts.hpAfter !== undefined) this.showHp(defSide, opts.hpAfter);
     else this.setHp(defSide, def.hp - hit.damage);
     this.slapCount++;
-    this.lastResult = result ? { ...result, kind: special ? 'special' : 'slap', damage: whole.damage } : { kind: 'limp', damage: hit.damage };
+    this.lastResult = result ? { ...result, kind: special ? 'special' : 'slap', damage: whole.damage, dodge } : { kind: 'limp', damage: hit.damage };
     const size = limp ? 0.45 : special ? 1.6 : crit ? 1.35 : contact === 'clean' ? 0.8 + power * 0.4 : 0.6;
     this.fx.flash(k.impactX, k.impactY, size);
     if (!limp && contact !== 'missed') {
@@ -966,14 +1440,32 @@ export class FightScene extends Phaser.Scene {
 
     // Arrêt sur image, puis réaction.
     this.freeze(limp ? 40 : HITSTOP_MS, () => {
-      this.setPose(defSide, 'hit');
+      // Esquive parfaite ou garde de rage : le perso reste debout, la gifle ne fait que l'effleurer.
+      const slipped = dodge === 'perfect' || dodge === 'rage';
+      if (!slipped || def.hp <= 0) this.setPose(defSide, 'hit');
+      if (dodge && def.hp > 0) {
+        this.setTint(defSide, DODGE_TINT[dodge]);
+        this.time.delayedCall(520, () => this.setTint(defSide, null));
+        if (dodge === 'rage') this.fx.screenFlash(0.3, COLORS.pink);
+      }
+      // Garde de rage : la rage est dépensée tout de suite (jauge vide, plus d'aura).
+      if (dodge === 'rage') {
+        this.showReady(defSide, false);
+        def.bar.setRage(0);
+      }
       const big = hit.damage >= 20 || crit;
       this.cameras.main.shake(special ? 320 : big ? 220 : 110, (special ? 0.02 : big ? 0.014 : 0.006) * (size < 0.7 ? 0.4 : 1));
       if (big) {
         this.fx.debris(k.impactX, k.impactY, dir, 6 + Math.round(power * 8), whole.damage >= 25 ? (crit ? 3 : 1) : 0);
         this.slowmo(special ? 0.25 : 0.35, special ? 520 : 380);
       }
-      const label: LabelKey | undefined = limp
+      const label: LabelKey | undefined = dodge
+        ? dodge === 'rage'
+          ? 'lbl_guard'
+          : dodge === 'perfect'
+            ? 'lbl_perfect'
+            : 'lbl_dodge'
+        : limp
         ? 'lbl_limp'
         : special
           ? 'lbl_special'
@@ -985,8 +1477,16 @@ export class FightScene extends Phaser.Scene {
               ? 'lbl_missed'
               : undefined;
       this.fx.damageNumber(k.impactX - dir * 45, k.impactY - 95, hit.damage, crit ? 'c' : 'n', label);
-      this.tweens.add({ targets: def.sprite, x: def.homeX + dir * (18 + power * 22), duration: 90, yoyo: true, ease: 'Quad.Out' });
-      sfx.cry(def.id, limp ? 0.1 : power);
+      // Recul : plus ample quand la gifle est esquivée (le perso s'est jeté en arrière).
+      this.tweens.killTweensOf(def.sprite);
+      this.tweens.chain({
+        targets: def.sprite,
+        tweens: [
+          { x: def.homeX + dir * (dodge ? 46 : 18 + power * 22), duration: 90, ease: 'Quad.Out' },
+          { x: def.homeX, duration: dodge ? 220 : 90, delay: dodge ? 160 : 0, ease: 'Quad.InOut' },
+        ],
+      });
+      sfx.cry(def.id, limp ? 0.1 : slipped ? power * 0.3 : power);
 
       // Foule et commentateur
       if (limp || contact === 'missed') {
@@ -997,7 +1497,7 @@ export class FightScene extends Phaser.Scene {
         sfx.crowd(crit ? 1 : power);
       }
       const ko = def.hp <= 0;
-      if (!ko) this.say(this.commentKind(whole, crit, contact));
+      if (!ko) this.say(dodge === 'rage' ? 'guard' : dodge === 'perfect' ? 'perfect' : dodge === 'good' && !crit ? 'dodge' : this.commentKind(whole, crit, contact));
       this.publish();
 
       this.time.delayedCall(300, () => {
@@ -1024,7 +1524,7 @@ export class FightScene extends Phaser.Scene {
     this.publish();
   }
 
-  private commentKind(hit: Extract<MatchEvent, { type: 'hit' }>, crit: boolean, contact: string): CommentKind {
+  private commentKind(hit: HitEvent, crit: boolean, contact: string): CommentKind {
     if (hit.kind === 'special') return this.f[hit.attacker].id === 'bernard' ? 'battoir' : 'toupie';
     if (hit.kind === 'limp') return 'limp';
     if (crit) return 'crit';
@@ -1069,59 +1569,62 @@ export class FightScene extends Phaser.Scene {
     fighter.bar.setValue(fighter.hp / MATCH.hp);
   }
 
-  /** Gifle spéciale : annonce, puis Le Battoir (un coup énorme) ou La Toupie (3 coups enchaînés). */
-  private specialAnim(hit: Extract<MatchEvent, { type: 'hit' }>, done: () => void) {
+  /**
+   * Gifle spéciale : Le Battoir (un coup énorme) ou La Toupie (jusqu'à 3 coups enchaînés).
+   * `arrived` : la spéciale a été annoncée à son déclenchement et la main est déjà sur la joue.
+   */
+  private specialAnim(hit: HitEvent, done: () => void, arrived = false) {
     const attSide = hit.attacker;
     const defSide = hit.defender;
     const att = this.f[attSide];
     const def = this.f[defSide];
     this.showReady(attSide, false);
-    sfx.powerUp();
-    this.fx.screenFlash(0.35, COLORS.pink);
-    this.cameras.main.shake(200, 0.004);
-    // La rage est dépensée : la jauge se vide dès l'annonce.
+    // La rage est dépensée : la jauge se vide.
     att.bar.setRage(0);
-    const d = announceImage(this, `ann_special_${att.id}`, 420, 0.3);
-    // On laisse l'annonce disparaître avant le coup.
-    this.time.delayedCall(d - 80, () => {
+    const strike = () => {
       const hits = hit.special!.hits;
-      if (hits.length === 1) return this.slapAnim(hit, done);
+      if (hits.length === 1) return this.slapAnim(hit, done, arrived);
       // La Toupie : chaque coup fait reculer la barre, le dernier déclenche la grande réaction.
       const k = computeStrike(this.layout, attSide, att.id, def.id);
       const startHp = def.hp;
       let cum = 0;
       att.sprite.setDepth(11);
       def.sprite.setDepth(10);
+      const contact = (i: number) => {
+        cum += hits[i];
+        const sub = { ...hit, damage: hits[i] };
+        if (i === hits.length - 1) {
+          this.impact(sub, k, done, { hpAfter: startHp - cum, whole: hit });
+          return;
+        }
+        this.chainHit(sub, k, startHp - cum, i, () =>
+          this.tweens.add({ targets: att.sprite, x: att.homeX + k.dir * k.step * 0.35, duration: 70, ease: 'Quad.In', onComplete: () => one(i + 1) }),
+        );
+      };
       const one = (i: number) => {
         this.setPose(attSide, 'swing');
         sfx.whoosh();
         this.time.delayedCall(45, () => {
           this.setPose(attSide, 'slap');
-          this.tweens.add({
-            targets: att.sprite,
-            x: att.homeX + k.dir * k.step,
-            duration: 60,
-            ease: 'Quad.Out',
-            onComplete: () => {
-              cum += hits[i];
-              const sub = { ...hit, damage: hits[i] };
-              if (i === hits.length - 1) {
-                this.impact(sub, k, done, { hpAfter: startHp - cum, whole: hit });
-                return;
-              }
-              this.chainHit(sub, k, startHp - cum, i, () =>
-                this.tweens.add({ targets: att.sprite, x: att.homeX + k.dir * k.step * 0.35, duration: 70, ease: 'Quad.In', onComplete: () => one(i + 1) }),
-              );
-            },
-          });
+          this.tweens.add({ targets: att.sprite, x: att.homeX + k.dir * k.step, duration: 60, ease: 'Quad.Out', onComplete: () => contact(i) });
         });
       };
-      one(0);
-    });
+      if (arrived) {
+        this.setPose(attSide, 'slap');
+        contact(0);
+      } else one(0);
+    };
+    if (arrived) return strike();
+    sfx.powerUp();
+    this.fx.screenFlash(0.35, COLORS.pink);
+    this.cameras.main.shake(200, 0.004);
+    const d = announceImage(this, `ann_special_${att.id}`, 420, 0.3);
+    // On laisse l'annonce disparaître avant le coup.
+    this.time.delayedCall(d - 80, strike);
   }
 
   /** Coup intermédiaire de La Toupie : éclair, chiffre, trace, son, mini arrêt sur image. */
-  private chainHit(hit: Extract<MatchEvent, { type: 'hit' }>, k: ReturnType<typeof computeStrike>, hpAfter: number, i: number, next: () => void) {
+  private chainHit(hit: HitEvent, k: ReturnType<typeof computeStrike>, hpAfter: number, i: number, next: () => void) {
     const defSide = hit.defender;
     const dir = k.dir as 1 | -1;
     this.showHp(defSide, hpAfter);
@@ -1132,6 +1635,8 @@ export class FightScene extends Phaser.Scene {
     this.cameras.main.shake(90, 0.008);
     this.freeze(45, () => {
       this.setPose(defSide, 'hit');
+      this.tweens.killTweensOf(this.f[defSide].sprite);
+      this.f[defSide].sprite.x = this.f[defSide].homeX;
       this.tweens.add({ targets: this.f[defSide].sprite, x: this.f[defSide].homeX + dir * 14, duration: 60, yoyo: true });
       this.time.delayedCall(70, next);
     });
@@ -1187,20 +1692,25 @@ export class FightScene extends Phaser.Scene {
   private knockout(loser: Side, events: MatchEvent[]) {
     const winner = other(loser);
     this.setPhase('roundEnd');
+    // Double K.O. (droit de réponse) : les deux tombent, puis le moins amoché se relève.
+    const double = !!this.match && this.match.hp.left <= 0 && this.match.hp.right <= 0;
+    this.setTint('left', null);
+    this.setTint('right', null);
     this.setPose(loser, 'dazed');
+    if (double) this.setPose(winner, 'dazed');
     this.fx.clearTransient();
     this.fx.screenFlash(0.7);
     this.slowmo(0.4, 700);
-    const d = announceImage(this, 'ann_ko', 900);
+    const d = announceImage(this, double ? 'ann_double_ko' : 'ann_ko', 900);
     this.cameras.main.shake(300, 0.012);
     sfx.ko();
     this.crowd.whistle();
     sfx.whistle(true);
-    this.say('ko');
+    this.say(double ? 'doubleKo' : 'ko');
     this.crowd.cheer(1);
     sfx.crowd(1, 1.8);
     this.time.delayedCall(450, () => this.crowd.cheer(1));
-    this.time.delayedCall(250, () => this.setPose(winner, 'victory'));
+    this.time.delayedCall(double ? 1000 : 250, () => this.setPose(winner, 'victory'));
 
     if (!this.match) {
       // Entraînement : on repart pour un tour.

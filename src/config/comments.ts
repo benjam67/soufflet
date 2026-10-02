@@ -11,6 +11,11 @@ export const COMMENTS = {
   rage: ['La rage monte ! Ça va faire très mal…', 'Il voit rouge ! Planquez les verres !', 'Les veines du cou sont sorties !'],
   battoir: ['LE BATTOIR ! Une main comme une pelle à tarte !', 'Le Battoir ! On a senti le courant d’air jusqu’au comptoir !'],
   toupie: ['LA TOUPIE ! Elle tourne, elle tourne… et ça claque !', 'Trois claques en une ! La Toupie est lâchée !'],
+  dodge: ['Esquivé ! La joue a filé comme une savonnette !', 'Il a vu venir la claque !', 'Un pas en arrière, et la gifle perd son jus !'],
+  perfect: ['ESQUIVE PARFAITE ! Il n’a senti qu’un courant d’air !', 'Quel réflexe ! Un chat de gouttière !'],
+  guard: ['GARDE DE RAGE ! Toute la colère dans un seul réflexe !', 'Il a tout misé sur l’esquive !'],
+  lastWord: ['Il est cuit… mais il a le droit de répondre !', 'Une dernière gifle avant de tomber !', 'Le droit de réponse ! Tout peut basculer !'],
+  doubleKo: ['DOUBLE K.O. ! Les deux au tapis !', 'Ils tombent ensemble ! On regarde qui a le moins morflé…'],
   stun: ['Sonné ! Il voit des petits oiseaux !', 'Les jambes en coton ! La jauge va faire n’importe quoi !'],
   ko: ['K.O. ! Appelez le pharmacien du village !', 'Rideau ! Il voit des étoiles !', 'Il est sonné comme une cloche de l’église !'],
 } as const;
