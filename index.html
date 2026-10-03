@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#1A1020" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Slap Fighter" />
+    <title>Slap Fighter</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=M+PLUS+1p:wght@500;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>:root{--ink:#1a1020;--yellow:#ffc93c;--red:#e8304a;--pink:#ff3d8b;--cyan:#35c8f0;--cream:#fff7e8}html,body{background:var(--ink);overscroll-behavior:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;height:100%;margin:0;overflow:hidden}#game{height:100dvh;position:fixed;top:0;bottom:0;left:0;right:0}#rotate{z-index:10;background:var(--ink);color:var(--cream);text-align:center;flex-direction:column;justify-content:center;align-items:center;gap:20px;padding:24px;font-family:"M PLUS 1p",system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;font-weight:800;display:none;position:fixed;top:0;bottom:0;left:0;right:0}#rotate .title{color:var(--yellow);text-shadow:3px 3px 0 var(--red);font-family:Dela Gothic One,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;font-size:30px;transform:rotate(-4deg)}#rotate .phone{border:6px solid var(--cream);border-radius:12px;width:54px;height:92px;animation:1.8s ease-in-out infinite tilt}#rotate p{margin:0;font-size:18px}#lobby{z-index:8;color:var(--cream);touch-action:manipulation;background:#1a1020d1;justify-content:center;align-items:center;font-family:"M PLUS 1p",system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;display:flex;position:fixed;top:0;bottom:0;left:0;right:0}#lobby[hidden]{display:none}#lobby .panel{box-sizing:border-box;background:var(--ink);border:5px solid var(--cream);width:min(92vw,520px);max-height:94vh;box-shadow:8px 8px 0 var(--red);text-align:center;padding:14px 18px 16px;position:relative;transform:rotate(-1.2deg)}#lobby .ttl{color:var(--yellow);text-shadow:3px 3px 0 var(--red);margin-bottom:8px;font-family:Dela Gothic One,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;font-size:26px}#lobby [data-view]{display:none}#lobby[data-show=choice] [data-view=choice],#lobby[data-show=host] [data-view=host],#lobby[data-show=join] [data-view=join],#lobby[data-show=busy] [data-view=busy]{display:block}#lobby p{margin:6px 0;font-size:15px;font-weight:800}#lobby .row{flex-wrap:wrap;justify-content:center;gap:12px;display:flex}#lobby button{color:var(--ink);background:var(--yellow);border:5px solid var(--ink);outline:3px solid var(--cream);cursor:pointer;touch-action:manipulation;margin:6px 0;padding:9px 16px;font-family:Dela Gothic One,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;font-size:18px;transform:rotate(-2deg)}#lobby button:active{transform:rotate(-2deg)scale(.95)}#lobby button.alt{background:var(--cyan)}#lobby button.back{background:var(--cream);border-width:3px;outline:none;padding:5px 10px;font-size:13px}#lobby .code{letter-spacing:10px;color:var(--cream);text-shadow:4px 4px 0 var(--pink);-webkit-user-select:text;user-select:text;font-family:Dela Gothic One,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;font-size:56px;line-height:1.1}#lobby input{text-align:center;letter-spacing:8px;text-transform:uppercase;width:5.2em;color:var(--ink);background:var(--cream);border:5px solid var(--yellow);-webkit-user-select:text;user-select:text;touch-action:manipulation;padding:2px 0 2px 8px;font-family:Dela Gothic One,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;font-size:40px}#lobby .status{min-height:20px;color:var(--cyan)}#lobby .status.err{color:var(--pink)}#netlost{z-index:7;background:var(--ink);color:var(--cream);border:5px solid var(--pink);text-align:center;pointer-events:none;padding:10px 22px;font-family:Dela Gothic One,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;font-size:20px;position:fixed;top:30%;left:50%;transform:translate(-50%,-50%)rotate(-3deg)}#netlost[hidden]{display:none}#netlost small{color:var(--cyan);font-family:"M PLUS 1p",system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Noto Sans,Ubuntu,Cantarell,Helvetica Neue,sans-serif;font-size:13px;font-weight:800;display:block}@keyframes tilt{0%,20%{transform:rotate(0)}55%,80%{transform:rotate(-90deg)}to{transform:rotate(0)}}@media (orientation:portrait){#rotate{display:flex}}</style>
+    <script type="module" crossorigin src="/soufflet/assets/index-CIApMtBw.js"></script>
+    <link rel="modulepreload" crossorigin href="/soufflet/assets/rolldown-runtime-hePW80VL.js">
+    <link rel="modulepreload" crossorigin href="/soufflet/assets/phaser-BXN5PTS-.js">
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="lobby" hidden data-show="choice">
+      <div class="panel">
+        <div class="ttl">EN LIGNE</div>
+        <div data-view="choice">
+          <p>Chacun sur son téléphone, avec un code de salon.</p>
+          <div class="row">
+            <button data-act="create">CRÉER UN SALON</button>
+            <button data-act="join" class="alt">REJOINDRE</button>
+          </div>
+        </div>
+        <div data-view="host">
+          <p>Donne ce code à ton adversaire :</p>
+          <div class="code" id="lobby-code-show">····</div>
+          <div class="row"><button data-act="share" class="alt">PARTAGER LE LIEN</button></div>
+          <p class="status" data-status>En attente de ton adversaire…</p>
+        </div>
+        <div data-view="join">
+          <p>Code du salon :</p>
+          <input id="lobby-code" maxlength="4" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="go" aria-label="Code du salon" />
+          <div class="row"><button data-act="go">C’EST PARTI</button></div>
+          <p class="status" data-status></p>
+        </div>
+        <div data-view="busy">
+          <p class="status" data-status>Connexion…</p>
+        </div>
+        <button data-act="back" class="back">← RETOUR</button>
+      </div>
+    </div>
+    <div id="netlost" hidden role="status">CONNEXION PERDUE…<small>On attend ton adversaire, la partie reprendra toute seule.</small></div>
+    <div id="rotate" role="alert">
+      <div class="title">SLAP FIGHTER</div>
+      <div class="phone" aria-hidden="true"></div>
+      <p>Tourne ton téléphone<br />pour en mettre une !</p>
+    </div>
+  </body>
+</html>
