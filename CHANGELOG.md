@@ -225,3 +225,9 @@ Retour du propriétaire après une partie à deux : sur iPhone, le plein écran 
 - **Zone sûre** (`src/ui/safe.ts`) : barres de vie, boutons, jauge, aide et bandeau du commentateur s'écartent de l'encoche et de la barre d'accueil ; le décor, lui, va jusqu'au bord. `?safe=gauche,droite,haut,bas` simule ces marges.
 - Zoom bloqué (pincement, double appui) ; le jeu se recale quand les barres de Safari apparaissent ou disparaissent ; hauteur calée sur la zone réellement visible (`100dvh`).
 - Non vérifiable depuis le bac à sable (pas d'iPhone) : testé avec des marges simulées, à confirmer sur l'appareil.
+
+## Poses d'esquive et de garde — 2026-10-03
+
+- Trois nouvelles poses par perso, fournies par le propriétaire : `dodge` (esquive), `dodge_perfect` (esquive parfaite), `guard` (garde de rage). Elles remplacent les teintes provisoires (bleu / or / rose).
+- Les images générées n'étaient pas détourées (fond noir ou blanc) et deux d'entre elles contenaient un second personnage et des traits de vitesse : détourage par remplissage depuis les bords, on ne garde que le perso, les zones de fond enfermées (entre un bras et le corps) sont retirées. Chaque pose est ensuite posée sur le canevas du perso (1300 × 823 ou 908 × 772), pieds sur la ligne commune, à la même échelle que les autres.
+- En jeu : la pose d'esquive apparaît dès que le joueur glisse vers l'arrière (et le perso se remet en place si c'était trop tôt) ; la garde de rage tient jusqu'à l'impact.

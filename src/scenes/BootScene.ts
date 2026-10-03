@@ -6,7 +6,7 @@ import type { FightData, Mode } from './FightScene';
 import type { AiLevel } from '../logic/ai';
 import { loadSession, normalizeCode } from '../net/protocol';
 
-export const POSES = ['idle', 'windup', 'swing', 'slap', 'hit', 'dazed', 'victory', 'selfslap'] as const;
+export const POSES = ['idle', 'windup', 'swing', 'slap', 'hit', 'dazed', 'victory', 'selfslap', 'dodge', 'dodge_perfect', 'guard'] as const;
 export type Pose = (typeof POSES)[number];
 export const fighterKey = (id: string, pose: Pose) => `${id}_${pose}`;
 

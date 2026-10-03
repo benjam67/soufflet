@@ -12,7 +12,7 @@ import path from 'node:path';
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const RAW = path.join(ROOT, 'raw');
 const OUT = path.join(ROOT, 'public/assets');
-const POSES = ['idle', 'windup', 'swing', 'slap', 'hit', 'dazed', 'victory', 'selfslap'];
+const POSES = ['idle', 'windup', 'swing', 'slap', 'hit', 'dazed', 'victory', 'selfslap', 'dodge', 'dodge_perfect', 'guard'];
 const FIGHTERS = { bernard: [1300, 823], lola: [908, 772] };
 // Bernard (le plus grand canevas) ramené à ~600 px de haut.
 const FIGHTER_SCALE = 600 / 823;

@@ -72,8 +72,8 @@ type HitEvent = Extract<MatchEvent, { type: 'hit' }>;
 type Defense = { defense?: DefenseQuality; rageGuard?: boolean };
 /** En ligne : temps d'attente maximal de l'esquive de l'adversaire (ms réelles). */
 const DEFENSE_WAIT_MS = 1200;
-/** Teintes de l'esquive (en attendant les vraies poses) : bleu = correcte, or = parfaite, rose = garde de rage. */
-const DODGE_TINT = { good: 0x8fd8ff, perfect: 0xffe27a, rage: 0xff9cc8 } as const;
+/** Pose de celui qui esquive : esquive correcte, esquive parfaite, garde de rage. */
+const DODGE_POSE = { good: 'dodge', perfect: 'dodge_perfect', rage: 'guard' } as const;
 
 /** Arrêt sur image au contact, avant la réaction (direction artistique : 80 ms). */
 const HITSTOP_MS = 80;
@@ -691,6 +691,8 @@ export class FightScene extends Phaser.Scene {
     this.defMove = null;
     this.defAt = null;
     this.defPointers.clear();
+    // Une garde ou une esquive restée en l'air (tour perdu au chrono, surchauffe) : retour en place.
+    for (const s of ['left', 'right'] as const) if (this.f[s].pose === 'guard' || this.f[s].pose === 'dodge' || this.f[s].pose === 'dodge_perfect') this.setPose(s, 'idle');
     this.timer.set(null);
     if (this.mode === 'training') {
       this.setPhase('ready');
@@ -1045,9 +1047,14 @@ export class FightScene extends Phaser.Scene {
     else if (!f.readyTag) f.sprite.setTint(this.skin[side]);
   }
 
-  /** Recul d'esquive (en attendant une vraie pose) : le perso part en arrière puis revient. */
-  private lean(side: Side) {
+  /** Recul d'esquive : pose d'esquive (ou de garde), le perso part en arrière puis revient. */
+  private lean(side: Side, pose: Pose = 'dodge') {
     const f = this.f[side];
+    this.setPose(side, pose);
+    // Esquive mal placée : le perso se remet en place (sinon l'impact prend la suite).
+    this.time.delayedCall(430, () => {
+      if (f.pose === pose && (this.phase === 'ready' || this.phase === 'charging' || this.phase === 'armed' || this.phase === 'combo' || this.phase === 'travel')) this.setPose(side, 'idle');
+    });
     const back = side === 'left' ? -1 : 1;
     this.tweens.killTweensOf(f.sprite);
     this.tweens.add({ targets: f.sprite, x: f.homeX + back * 34, duration: 80, ease: 'Quad.Out', yoyo: true, hold: 260 });
@@ -1064,6 +1071,8 @@ export class FightScene extends Phaser.Scene {
       this.lean(def);
       sfx.whoosh();
     } else if (this.match?.specialReady[def]) {
+      // Garde de rage : elle tient jusqu'à l'impact.
+      this.setPose(def, 'guard');
       this.fx.screenFlash(0.2, COLORS.pink);
       sfx.powerUp();
     }
@@ -1111,7 +1120,8 @@ export class FightScene extends Phaser.Scene {
     this.time.delayedCall(T - 70, () => {
       if (this.phase === 'travel') this.setPose(attSide, 'slap');
     });
-    if (pre && (pre.defense || pre.rageGuard)) this.time.delayedCall(T - (pre.defense === 'good' ? 140 : 60), () => this.lean(defSide));
+    if (pre?.rageGuard) this.time.delayedCall(T - 200, () => this.setPose(defSide, 'guard'));
+    else if (pre?.defense) this.time.delayedCall(T - (pre.defense === 'good' ? 140 : 60), () => this.lean(defSide, DODGE_POSE[pre.defense!]));
     this.tweens.killTweensOf(att.sprite);
     this.tweens.add({ targets: att.sprite, x: att.homeX + k.dir * k.step, duration: T, ease: 'Quad.In', onComplete: () => this.arrive() });
   }
@@ -1445,7 +1455,8 @@ export class FightScene extends Phaser.Scene {
     const power = special ? 1 : Math.min(1, hit.damage / 34);
     const dir = k.dir as 1 | -1;
 
-    // Contact : la main est sur la joue (pose idle).
+    // Contact : la main est sur la joue (pose idle), ou passe à côté si la gifle est esquivée.
+    if (dodge && this.match && this.match.hp[defSide] > 0) this.setPose(defSide, DODGE_POSE[dodge]);
     if (opts.hpAfter !== undefined) this.showHp(defSide, opts.hpAfter);
     else this.setHp(defSide, def.hp - hit.damage);
     this.slapCount++;
@@ -1465,12 +1476,8 @@ export class FightScene extends Phaser.Scene {
     this.freeze(limp ? 40 : HITSTOP_MS, () => {
       // Esquive parfaite ou garde de rage : le perso reste debout, la gifle ne fait que l'effleurer.
       const slipped = dodge === 'perfect' || dodge === 'rage';
-      if (!slipped || def.hp <= 0) this.setPose(defSide, 'hit');
-      if (dodge && def.hp > 0) {
-        this.setTint(defSide, DODGE_TINT[dodge]);
-        this.time.delayedCall(520, () => this.setTint(defSide, null));
-        if (dodge === 'rage') this.fx.screenFlash(0.3, COLORS.pink);
-      }
+      if (!dodge || def.hp <= 0) this.setPose(defSide, 'hit');
+      if (dodge === 'rage' && def.hp > 0) this.fx.screenFlash(0.3, COLORS.pink);
       // Garde de rage : la rage est dépensée tout de suite (jauge vide, plus d'aura).
       if (dodge === 'rage') {
         this.showReady(defSide, false);
